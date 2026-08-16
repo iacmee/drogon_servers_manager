@@ -1,0 +1,5 @@
+{
+    "rdbms": "sqlite3",
+    "filename": "db/database.db",
+    "tables": []
+}

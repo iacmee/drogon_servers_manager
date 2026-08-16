@@ -1,0 +1,32 @@
+{
+  "app": {
+    "bind": "127.0.0.1",
+    "port": 8443,
+    "threads": 2,
+
+    "document_root": "/home/iacme/Downloads/PaperPilot-1.0.0/public",
+    "backup_root": "/home/iacme/Downloads/PaperPilot-1.0.0/backups",
+    "database_file": "/home/iacme/Desktop/https/db/database.db",
+
+    "https": {
+      "enabled": true,
+      "cert": "/home/iacme/Desktop/https/certs/server.crt",
+      "key": "/home/iacme/Desktop/https/certs/server.key"
+    },
+
+    "session": {
+      "enabled": true,
+      "timeout": 3600
+    }
+  },
+
+  "servers": [
+    {
+      "id": "letsgoo",
+      "name": "Letsgoo",
+      "directory": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo",
+      "service": "minecraft@letsgoo.service",
+      "log": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo/logs/latest.log"
+    }
+  ]
+}
