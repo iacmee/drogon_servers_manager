@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -O2
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -O2
 CXXFLAGS += -Iinclude -Imodels
 CXXFLAGS += $(shell pkg-config --cflags jsoncpp) 
 CXXFLAGS += $(shell pkg-config --cflags libsodium)

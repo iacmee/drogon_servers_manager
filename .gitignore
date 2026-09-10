@@ -2,3 +2,7 @@
 /certs/
 
 obj/main.o
+
+/obj/
+.vscode
+logs

@@ -1,18 +1,12 @@
 #include "config.h"
 #include "UserController.hpp"
-#include <drogon/drogon.h>
-#include <filesystem>
-#include <iostream>
-#include <sodium.h>
 
 int	main(int argc, char *argv[])
 {
 	try
 	{
-        if (sodium_init() < 0)
-            throw std::runtime_error("Cannot initialize libsodium");
     
-		const std::string configFile = argc > 1 ? argv[1] : "/config/config.json";
+		const std::string configFile = argc > 1 ? argv[1] : "config/config.json";
 		paperpilot::Config config = paperpilot::Config::load(configFile);
 
 		// Validazioni filesystem
@@ -30,24 +24,52 @@ int	main(int argc, char *argv[])
 				throw std::runtime_error("Chiave privata inesistente: " + config.https.key);
 		}
 
-        
 		// Drogon
         
 		auto &app = drogon::app();
 		app.setThreadNum(config.threads);
 		app.setDocumentRoot(config.documentRoot);
-        auto controller = std::make_shared<UserController>(config.databaseFile);
-        app.registerController(controller);
-
-        // insert db
         app.addDbClient(drogon::orm::Sqlite3Config{1, config.databaseFile, "default", -1});
-
-		// Sessioni
 
 		if (config.session.enabled)
 			app.enableSession(config.session.timeout, drogon::Cookie::SameSite::kLax);
+        if (!config.plugins.empty())
+            app.addPlugins(config.plugins);
 
-		// HTTPS
+        app.registerBeginningAdvice([]()
+        {
+            auto *hodor = drogon::app().getPlugin<drogon::plugin::Hodor>();
+
+            if (!hodor)
+                throw std::runtime_error("Hodor plugin not available");
+
+            hodor->setUserIdGetter(
+                [](const drogon::HttpRequestPtr &req) -> std::optional<std::string>
+                {
+                    if (req->path() != "/api/auth/login")
+                        return (std::nullopt);
+
+                    auto json = req->getJsonObject();
+
+                    if (!json ||
+                        !json->isObject() ||
+                        !json->isMember("username") ||
+                        !(*json)["username"].isString())
+                    {
+                        return (std::nullopt);
+                    }
+
+                    const std::string username = (*json)["username"].asString();
+
+                    if (username.empty() ||
+                        username.size() > 128)
+                    {
+                        return (std::nullopt);
+                    }
+
+                    return (username);
+                });
+        });
 
 		if (config.https.enabled)
 		{
@@ -58,11 +80,7 @@ int	main(int argc, char *argv[])
 			app.addListener(config.bind, config.port, false);
 
 
-		std::cout << "PaperPilot\n"
-					<< "Bind: " << config.bind << ":" << config.port << "\n"
-					<< "HTTPS: " << (config.https.enabled ? "enabled" : "disabled") << "\n"
-					<< "Document root: " << config.documentRoot << "\n"
-					<< "Managed servers: " << config.servers.size() << "\n";
+		std::cout << "Bind: https://" << config.bind << ":" << config.port << "\n";
 
 		app.run();
 	}

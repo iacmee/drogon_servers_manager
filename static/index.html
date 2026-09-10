@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Gestione utenti</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<main class="app-shell">
+
+    <header class="hero">
+        <div class="hero-badge">Drogon Authentication</div>
+
+        <h1>Gestione utenti</h1>
+
+        <p>
+            Registrazione tramite invite token e accesso al server.
+        </p>
+    </header>
+
+
+    <!-- ========================================================= -->
+    <!-- REGISTRAZIONE                                             -->
+    <!-- ========================================================= -->
+
+    <section class="card card-register">
+
+        <div class="section-heading">
+
+            <span class="section-icon">01</span>
+
+            <div>
+                <h2>Crea nuovo utente</h2>
+
+                <p>
+                    Inserisci il token di invito, username e password.
+                </p>
+            </div>
+
+        </div>
+
+
+        <form id="registerForm">
+
+            <label>
+                Invite / Bootstrap token
+
+                <input
+                    id="registerToken"
+                    name="token"
+                    type="text"
+                    autocomplete="off"
+                    placeholder="Inserisci il token"
+                    required
+                >
+            </label>
+
+
+            <label>
+                Username
+
+                <input
+                    id="registerUsername"
+                    name="username"
+                    type="text"
+                    autocomplete="username"
+                    placeholder="Username"
+                    maxlength="128"
+                    required
+                >
+            </label>
+
+
+            <label>
+                Password
+
+                <input
+                    id="registerPassword"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Password"
+                    maxlength="128"
+                    required
+                >
+            </label>
+
+
+            <button type="submit">
+                Crea account
+            </button>
+
+        </form>
+
+    </section>
+
+
+    <!-- ========================================================= -->
+    <!-- LOGIN                                                     -->
+    <!-- ========================================================= -->
+
+    <section class="card card-login">
+
+        <div class="section-heading">
+
+            <span class="section-icon">02</span>
+
+            <div>
+                <h2>Login</h2>
+
+                <p>
+                    Accedi con username e password.
+                </p>
+            </div>
+
+        </div>
+
+
+        <form id="loginForm">
+
+            <label>
+                Username
+
+                <input
+                    id="loginUsername"
+                    name="username"
+                    type="text"
+                    autocomplete="username"
+                    placeholder="Username"
+                    maxlength="128"
+                    required
+                >
+            </label>
+
+
+            <label>
+                Password
+
+                <input
+                    id="loginPassword"
+                    name="password"
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="Password"
+                    maxlength="128"
+                    required
+                >
+            </label>
+
+
+            <button type="submit">
+                Login
+            </button>
+
+        </form>
+
+    </section>
+
+
+    <!-- ========================================================= -->
+    <!-- LOGOUT                                                    -->
+    <!-- ========================================================= -->
+
+    <section class="card card-session">
+
+        <div class="section-heading">
+
+            <span class="section-icon">03</span>
+
+            <div>
+                <h2>Sessione</h2>
+
+                <p>
+                    Termina la sessione corrente.
+                </p>
+            </div>
+
+        </div>
+
+
+        <button
+            id="logoutButton"
+            type="button"
+        >
+            Logout
+        </button>
+
+    </section>
+
+
+    <!-- ========================================================= -->
+    <!-- OUTPUT SERVER                                             -->
+    <!-- ========================================================= -->
+
+    <section class="card card-status">
+
+        <div class="section-heading">
+
+            <span class="section-icon">API</span>
+
+            <div>
+                <h2>Risposta server</h2>
+
+                <p>
+                    Risultato delle richieste HTTP.
+                </p>
+            </div>
+
+        </div>
+
+
+        <div
+            id="status"
+            aria-live="polite"
+        >
+            Pronto.
+        </div>
+
+    </section>
+
+</main>
+
+
+<script src="app.js" defer></script>
+
+</body>
+</html>

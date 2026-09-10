@@ -1,32 +1,65 @@
 {
-  "app": {
-    "bind": "127.0.0.1",
-    "port": 8443,
-    "threads": 2,
-
-    "document_root": "/home/iacme/Downloads/PaperPilot-1.0.0/public",
-    "backup_root": "/home/iacme/Downloads/PaperPilot-1.0.0/backups",
-    "database_file": "/home/iacme/Desktop/https/db/database.db",
-
-    "https": {
-      "enabled": true,
-      "cert": "/home/iacme/Desktop/https/certs/server.crt",
-      "key": "/home/iacme/Desktop/https/certs/server.key"
+    "app": {
+        "bind": "127.0.0.1",
+        "port": 8443,
+        "threads": 2,
+        "document_root": "/home/iacme/Desktop/https/static",
+        "backup_root": "/home/iacme/Downloads/PaperPilot-1.0.0/backups",
+        "database_file": "/home/iacme/Desktop/https/db/database.db",
+        "https": {
+            "enabled": true,
+            "cert": "/home/iacme/Desktop/https/certs/server.crt",
+            "key": "/home/iacme/Desktop/https/certs/server.key"
+        },
+        "session": {
+            "enabled": true,
+            "timeout": 3600
+        }
     },
-
-    "session": {
-      "enabled": true,
-      "timeout": 3600
-    }
-  },
+    "plugins": [
+        {
+            "name": "drogon::plugin::Hodor",
+            "dependencies": [],
+            "config": {
+                "algorithm": "sliding_window",
+                "urls": [
+                    "^/api/auth/login$"
+                ],
+                "time_unit": 60,
+                "capacity": 1000,
+                "ip_capacity": 20,
+                "user_capacity": 15,
+                "multi_threads": true,
+                "use_real_ip_resolver": false,
+                "rejection_message": "Too many authentication attempts",
+                "limiter_expire_time": 600,
+                "trust_ips": []
+            }
+        },
+        {
+            "name": "drogon::plugin::AccessLogger",
+            "dependencies": [],
+            "config": {
+                "use_spdlog": false,
+                "log_path": "./logs",
+                "log_file": "access.log",
+                "log_index": 1,
+                "log_size_limit": 10485760,
+                "max_files": 5,
+                "use_local_time": true,
+                "show_microseconds": false,
+                "log_format": "$request_date $remote_addr $method $path $status_code $body_bytes_sent $processing_time"
+            }
+        }
+    ],
 
   "servers": [
-    {
-      "id": "letsgoo",
-      "name": "Letsgoo",
-      "directory": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo",
-      "service": "minecraft@letsgoo.service",
-      "log": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo/logs/latest.log"
-    }
-  ]
+        {
+            "id": "letsgoo",
+            "name": "Letsgoo",
+            "directory": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo",
+            "service": "minecraft@letsgoo.service",
+            "log": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo/logs/latest.log"
+        }
+    ]
 }

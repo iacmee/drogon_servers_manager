@@ -1,150 +1,97 @@
 #include "UserController.hpp"
-#include <cstdint>
-#include <drogon/drogon.h>
-#include <json/json.h>
 #include <sodium.h>
-#include <sqlite3.h>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include "Users.h"
 
-namespace
+std::string UserController::generateInviteToken()
 {
-    // Small RAII wrapper around sqlite3_stmt.
-    // The statement is always finalized when it goes out of scope.
-    class SqliteStatement
+    constexpr std::size_t tokenBytes = 32;
+    constexpr int variant = sodium_base64_VARIANT_URLSAFE_NO_PADDING;
+
+    std::array<unsigned char, tokenBytes> randomData{};
+    randombytes_buf(randomData.data(),randomData.size());
+
+    std::array<char, sodium_base64_ENCODED_LEN(tokenBytes, variant)> encoded{};
+    sodium_bin2base64(encoded.data(), encoded.size(), randomData.data(), randomData.size(), variant);
+
+    sodium_memzero(randomData.data(), randomData.size());
+
+    return (std::string(encoded.data()));
+}
+
+std::string UserController::hashInviteToken(std::string_view token)
+{
+    std::array<unsigned char, crypto_generichash_BYTES> hash{};
+
+    if (crypto_generichash(
+            hash.data(),
+            hash.size(),
+            reinterpret_cast<const unsigned char *>(token.data()),
+            static_cast<unsigned long long>(token.size()),
+            nullptr,
+            0) != 0)
     {
-    public:
-        SqliteStatement(sqlite3 *db, const char *sql) : m_db(db)
-        {
-            const int rc = sqlite3_prepare_v2(m_db, sql, -1, &m_stmt, nullptr);
-
-            if (rc != SQLITE_OK)
-            {
-                throw std::runtime_error(std::string("sqlite3_prepare_v2 failed: ") + sqlite3_errmsg(m_db));
-            }
-        }
-
-        ~SqliteStatement()
-        {
-            if (m_stmt)
-            {
-                sqlite3_finalize(m_stmt);
-            }
-        }
-
-        SqliteStatement(const SqliteStatement &) = delete;
-        SqliteStatement &operator=(const SqliteStatement &) = delete;
-
-        sqlite3_stmt *get() const
-        {
-            return (m_stmt);
-        }
-
-        void bindText(int index, std::string_view value)
-        {
-            const int rc = sqlite3_bind_text(m_stmt, index, value.data(),
-                                             static_cast<int>(value.size()), SQLITE_TRANSIENT);
-
-            if (rc != SQLITE_OK)
-            {
-                throw std::runtime_error(std::string("sqlite3_bind_text failed: ") + sqlite3_errmsg(m_db));
-            }
-        }
-
-    private:
-        sqlite3 *m_db{nullptr};
-        sqlite3_stmt *m_stmt{nullptr};
-    };
-
-    std::string readTextColumn(sqlite3_stmt *stmt, int column)
-    {
-        const unsigned char *value = sqlite3_column_text(stmt, column);
-
-        if (!value)
-            return (std::string(""));
-        return (reinterpret_cast<const char *>(value));
+        throw std::runtime_error("Invite token hashing failed");
     }
 
-} // namespace
+    std::array<char, crypto_generichash_BYTES * 2 + 1> encoded{};
+
+    sodium_bin2hex(encoded.data(), encoded.size(), hash.data(), hash.size());
+    sodium_memzero(hash.data(), hash.size());
+
+    return std::string(encoded.data());
+}
+
 
 // -----------------------------------------------------------------------------
 // Constructor
 // -----------------------------------------------------------------------------
 
-UserController::UserController(const std::string &databaseFile)
+UserController::UserController()
 {
-    const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
-    int rc;
+    drogon::app().registerBeginningAdvice(
+        [this]()
+        {
+            start(drogon::app().getDbClient());
+        });
+}
 
+void UserController::start(drogon::orm::DbClientPtr db)
+{
+    if (!db)
+        throw std::runtime_error("UserController: database client unavailable");
     if (sodium_init() < 0)
         throw std::runtime_error("Cannot initialize libsodium");
 
-    rc = sqlite3_open_v2(databaseFile.c_str(), &m_db, flags, nullptr);
-    if (rc != SQLITE_OK)
+    m_db = std::move(db);
+    initializeDatabase();
+    m_dummyPasswordHash = hashPassword("dummy-password-for-timing-only");
+
+    if (needBootStrap())
     {
-        const std::string error = m_db ? sqlite3_errmsg(m_db) : "Unknown SQLite error";
-        if (m_db)
-        {
-            sqlite3_close(m_db);
-            m_db = nullptr;
-        }
-        throw std::runtime_error("Cannot open database: " + error);
-    }
-    // Wait for a short time instead of immediately failing
-    // if another process temporarily locks the database.
-    rc = sqlite3_busy_timeout(m_db, 5000);
-    if (rc != SQLITE_OK)
-    {
-        const std::string error = sqlite3_errmsg(m_db);
-        sqlite3_close(m_db);
-        m_db = nullptr;
-        throw std::runtime_error("Cannot configure SQLite busy timeout: " + error);
-    }
-    try
-    {
-        initializeDatabase();
-    }
-    catch (...)
-    {
-        sqlite3_close(m_db);
-        m_db = nullptr;
-        throw;
+        m_db->execSqlSync("DELETE FROM invite_tokens");
+        const std::string token = generateInviteToken();
+        const std::string tokenHash = hashInviteToken(token);
+
+        auto id = insertInviteToken(tokenHash, 1, std::chrono::minutes(5));
+        if (!id)
+            throw std::runtime_error("Cannot create bootstrap invite token");
+
+        std::cerr
+            << "\n============================================\n"
+            << " INITIAL BOOTSTRAP TOKEN\n"
+            << " " << token << '\n'
+            << " Valid for 5 minutes and one use only\n"
+            << "============================================\n\n";
     }
 
-    try
-    {
-        auto masterUser = findUser("register_new_user");
-        if (!masterUser)
-        {
-            LOG_INFO << "Registration master user "
-                      << "'register_new_user' was not found"
-                      << " cannot register new users";
-            m_isRegistrationOn = false;
-        }
-        else
-            m_isRegistrationOn = true;
-    }
-    catch (const std::exception &e)
-    {
-        m_isRegistrationOn = false;
-        LOG_ERROR << e.what();
-    }
 }
 
 // -----------------------------------------------------------------------------
 // Destructor
 // -----------------------------------------------------------------------------
 
-UserController::~UserController()
-{
-    if (m_db)
-    {
-        sqlite3_close(m_db);
-        m_db = nullptr;
-    }
-}
+// UserController::~UserController()
+// {
+// }
 
 // -----------------------------------------------------------------------------
 // Database initialization
@@ -152,8 +99,7 @@ UserController::~UserController()
 
 void UserController::initializeDatabase()
 {
-    char *error = nullptr;
-    const char *sql = R"SQL(
+    static constexpr std::string_view usersSql = R"SQL(
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
@@ -162,116 +108,195 @@ void UserController::initializeDatabase()
         );
     )SQL";
 
-    const int rc = sqlite3_exec(m_db, sql, nullptr, nullptr, &error);
-    if (rc != SQLITE_OK)
-    {
-        const std::string message = error ? error : sqlite3_errmsg(m_db);
-        if (error)
-            sqlite3_free(error);
-        throw std::runtime_error("Cannot create users table: " + message);
-    }
+    static constexpr std::string_view settingsSql = R"SQL(
+        CREATE TABLE IF NOT EXISTS invite_tokens (
+            id INTEGER PRIMARY KEY,
+            token_hash TEXT NOT NULL UNIQUE,
+            uses_left INTEGER NOT NULL CHECK (uses_left >= 0),
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            expires_at INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1
+                CHECK (enabled IN (0, 1))
+        );
+    )SQL";
+
+    m_db->execSqlSync(std::string(usersSql));
+    m_db->execSqlSync(std::string(settingsSql));
 }
 
 // -----------------------------------------------------------------------------
 // Find user
 // -----------------------------------------------------------------------------
 
-std::optional<drogon_model::sqlite3::Users> UserController::findUser(const std::string &username)
+drogon::Task<std::optional<drogon_model::sqlite3::Users>>
+UserController::findUserAsync(const std::string &username)
 {
-    // const char *sql = R"SQL(
-    //     SELECT
-    //         id,
-    //         username,
-    //         password_hash,
-    //         created_at
-    //     FROM users
-    //     WHERE username = ?1
-    //     LIMIT 1;
-    // )SQL";
-
     using namespace drogon::orm;
     using namespace drogon_model::sqlite3;
 
-    auto db = drogon::app().getDbClient();
-    Mapper<Users> mapper(db);
+    CoroMapper<Users> mapper(m_db);
+    try
+    {
+        auto user = co_await mapper.findOne(Criteria(Users::Cols::_username, CompareOperator::EQ, username));
+        co_return (user);
+    }
+    catch (const UnexpectedRows &e)
+    {
+        co_return (std::nullopt);
+    }
+}
+
+std::optional<drogon_model::sqlite3::Users>
+UserController::findUser(const std::string &username)
+{
+    using namespace drogon::orm;
+    using namespace drogon_model::sqlite3;
+
+    Mapper<Users> mapper(m_db);
     try
     {
         auto user = mapper.findOne(Criteria(Users::Cols::_username, CompareOperator::EQ, username));
-
         return (user);
     }
     catch (const UnexpectedRows &e)
     {
         return (std::nullopt);
     }
-
-
-    // SqliteStatement stmt(m_db, sql);
-    // stmt.bindText(1, username);
-    // const int rc = sqlite3_step(stmt.get());
-
-    // if (rc == SQLITE_DONE)
-    //     return (std::nullopt);
-    // if (rc != SQLITE_ROW)
-    //     throw std::runtime_error(std::string("Cannot read user from database: ") + sqlite3_errmsg(m_db));
-    // UserController::UserRecord user;
-    // user.id = sqlite3_column_int64(stmt.get(), 0);
-    // user.username = readTextColumn(stmt.get(), 1);
-    // user.passwordHash = readTextColumn(stmt.get(), 2);
-    // user.createdAt = sqlite3_column_int64(stmt.get(), 3);
-    // return (user);
 }
+
+drogon::Task<std::optional<drogon_model::sqlite3::InviteTokens>>
+UserController::findInviteTokenAsync(const std::string &tokeHash)
+{
+    using namespace drogon::orm;
+    using namespace drogon_model::sqlite3;
+
+    CoroMapper<InviteTokens> mapper(m_db);
+    try
+    {
+        auto inviteToken = co_await mapper.findOne(Criteria(InviteTokens::Cols::_token_hash, CompareOperator::EQ, tokeHash));
+        co_return (inviteToken);
+    }
+    catch (const UnexpectedRows &e)
+    {
+        co_return (std::nullopt);
+    }
+}
+
+std::optional<drogon_model::sqlite3::InviteTokens>
+UserController::findInviteToken(const std::string &tokeHash)
+{
+    using namespace drogon::orm;
+    using namespace drogon_model::sqlite3;
+
+    Mapper<InviteTokens> mapper(m_db);
+    try
+    {
+        auto inviteToken = mapper.findOne(Criteria(InviteTokens::Cols::_token_hash, CompareOperator::EQ, tokeHash));
+        return (inviteToken);
+    }
+    catch (const UnexpectedRows &e)
+    {
+        return (std::nullopt);
+    }
+}
+
+
 
 // -----------------------------------------------------------------------------
 // Insert user
 // -----------------------------------------------------------------------------
 
-std::optional<std::int64_t> UserController::insertUser(std::string_view username,
-                                                       std::string_view passwordHash)
+drogon::Task<std::optional<std::int64_t>>
+UserController::insertUserAsync(std::string_view username, std::string_view password)
 {
-    /*
-     * RETURNING avoids using sqlite3_last_insert_rowid().
-     *
-     * This is important because this controller uses one serialized SQLite
-     * connection that may be accessed by multiple Drogon worker threads.
-     */
-    const char *sql = R"SQL(
-        INSERT INTO users (
-            username,
-            password_hash,
-            created_at
-        )
-        VALUES (
-            ?1,
-            ?2,
-            unixepoch()
-        )
-        RETURNING id
-    )SQL";
-    SqliteStatement stmt(m_db, sql);
-    stmt.bindText(1, username);
-    stmt.bindText(2, passwordHash);
-    int rc = sqlite3_step(stmt.get());
-    /*
-     * SQLITE_CONSTRAINT can be returned when the UNIQUE constraint
-     * on username is violated.
-     *
-     * The low byte contains the primary SQLite result code, so this
-     * also works if extended result codes are enabled.
-     */
-    if ((rc & 0xFF) == SQLITE_CONSTRAINT)
-        return (std::nullopt);
-    if (rc != SQLITE_ROW)
-        throw std::runtime_error(std::string("Cannot insert user: ") + sqlite3_errmsg(m_db));
-    const std::int64_t newId = sqlite3_column_int64(stmt.get(), 0);
-    /*
-     * Finish execution of the INSERT ... RETURNING statement.
-     */
-    rc = sqlite3_step(stmt.get());
-    if (rc != SQLITE_DONE)
-        throw std::runtime_error(std::string("Cannot complete user insertion: ") + sqlite3_errmsg(m_db));
-    return (newId);
+    using namespace drogon::orm;
+    using namespace drogon_model::sqlite3;
+
+    std::string passwordHash = hashPassword(password);
+    Users user;
+    user.setUsername(std::string(username));
+    user.setPasswordHash(passwordHash);
+    user.setCreatedAt(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+
+
+    CoroMapper<Users> mapper(m_db);
+
+    try
+    {
+        auto insertedUser = co_await mapper.insert(user);
+        co_return (insertedUser.getValueOfId());
+    }
+    catch (const UniqueViolation &)
+    {
+        co_return (std::nullopt);
+    }
 }
+
+std::optional<std::int64_t>
+UserController::insertUser(std::string_view username, std::string_view password)
+{
+    using namespace drogon::orm;
+    using namespace drogon_model::sqlite3;
+
+    std::string PasswordHash = hashPassword(password);
+    Users user;
+    user.setUsername(std::string(username));
+    user.setPasswordHash(PasswordHash);
+    user.setCreatedAt(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+
+
+    Mapper<Users> mapper(m_db);
+
+    try
+    {
+        mapper.insert(user);
+        return (user.getValueOfId());
+    }
+    catch (const UniqueViolation &)
+    {
+        return (std::nullopt);
+    }
+}
+
+std::optional<std::int64_t>
+UserController::insertInviteToken(
+    const std::string &tokenHash,
+    int times,
+    std::optional<std::chrono::seconds> lifetime)
+{
+    using namespace drogon::orm;
+    using namespace drogon_model::sqlite3;
+
+    InviteTokens token;
+    token.setTokenHash(tokenHash);
+    token.setUsesLeft(times);
+    token.setEnabled(1);
+
+    if (lifetime)
+    {
+        const auto expiresAt = std::chrono::system_clock::now() + *lifetime;
+
+        const auto unixTime =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                expiresAt.time_since_epoch()
+            ).count();
+
+        token.setExpiresAt(unixTime);
+    }
+
+    Mapper<InviteTokens> mapper(m_db);
+
+    try
+    {
+        mapper.insert(token);
+        return (token.getValueOfId());
+    }
+    catch (const UniqueViolation &)
+    {
+        return (std::nullopt);
+    }
+}
+
 
 // -----------------------------------------------------------------------------
 // Password hashing
@@ -287,7 +312,7 @@ std::string UserController::hashPassword(std::string_view password)
     if (rc != 0)
         throw std::runtime_error("Password hashing failed");
     std::string result(hash);
-    std::memset(hash, 0, sizeof(hash));
+    sodium_memzero(hash, sizeof(hash));
     return (result);
 }
 
@@ -301,6 +326,58 @@ bool UserController::verifyPassword(std::string_view password,
     return (crypto_pwhash_str_verify(storedHash.c_str(), password.data(),
                                      password.size()) == 0);
 }
+
+// bool UserController::verifyInviteToken(drogon_model::sqlite3::InviteTokens &inviteToken)
+// {
+//     using namespace drogon::orm;
+//     using namespace drogon_model::sqlite3;
+
+//     bool removeToken = false;
+
+//     if (inviteToken.getValueOfEnabled() == 0)
+//         removeToken = true;
+//     if (inviteToken.getValueOfUsesLeft() <= 0)
+//         removeToken = true;
+
+//     const auto &expiresAt = inviteToken.getExpiresAt();
+//     if (expiresAt)
+//     {
+//         const auto now =
+//             std::chrono::duration_cast<std::chrono::seconds>(
+//                 std::chrono::system_clock::now().time_since_epoch()
+//             ).count();
+
+//         if (*expiresAt <= now)
+//             removeToken = true;
+//     }
+
+//     if (removeToken)
+//     {
+//         Mapper<InviteTokens> mapper(m_db);
+//         mapper.deleteOne(inviteToken);
+//         return (false);
+//     }
+//     return (true);
+// }
+
+// void UserController::useInviteToken(drogon_model::sqlite3::InviteTokens &inviteToken)
+// {
+//     using namespace drogon::orm;
+//     using namespace drogon_model::sqlite3;
+
+//     Mapper<InviteTokens> mapper(m_db);
+
+//     const auto usesLeft = inviteToken.getValueOfUsesLeft();
+
+//     if (usesLeft <= 1)
+//     {
+//         mapper.deleteOne(inviteToken);
+//         return ;
+//     }
+
+//     inviteToken.setUsesLeft(usesLeft - 1);
+//     mapper.update(inviteToken);
+// }
 
 // -----------------------------------------------------------------------------
 // JSON error helper
@@ -320,66 +397,101 @@ drogon::HttpResponsePtr UserController::jsonError(drogon::HttpStatusCode status,
 // Register new user
 // -----------------------------------------------------------------------------
 
-void UserController::createNewUser(const drogon::HttpRequestPtr &req, Callback &&callback)
+drogon::Task<> UserController::createNewUser(drogon::HttpRequestPtr req, Callback callback)
 {
-    if (!m_isRegistrationOn)
-    {
-        callback(jsonError(drogon::k403Forbidden, "User registration is not configured"));
-        return ;
-    }
 
     auto json = req->getJsonObject();
     if (!json || !json->isObject())
-        return (callback(jsonError(drogon::k400BadRequest, "Invalid JSON body")));
-    if (!json->isMember("username") || !json->isMember("password") || !json->isMember("master_password"))
-        return (callback(jsonError(drogon::k400BadRequest, "Missing user, password or master_password")));
-    if (!(*json)["username"].isString() || !(*json)["password"].isString() || !(*json)["master_password"].isString())
-        return (callback(jsonError(drogon::k400BadRequest, "user, password and master_password must be strings")));
+        co_return (callback(jsonError(drogon::k400BadRequest, "Invalid JSON body")));
+    if (!json->isMember("username") || !json->isMember("password") || !json->isMember("token"))
+        co_return (callback(jsonError(drogon::k400BadRequest, "Missing user, password or token")));
+    if (!(*json)["username"].isString() || !(*json)["password"].isString() || !(*json)["token"].isString())
+        co_return (callback(jsonError(drogon::k400BadRequest, "user, password and token must be strings")));
 
     const std::string username = (*json)["username"].asString();
     const std::string password = (*json)["password"].asString();
-    const std::string masterPassword = (*json)["master_password"].asString();
+    const std::string token = (*json)["token"].asString();
 
-    // Validate username
-    if (username.size() < 4)
-        return (callback(jsonError(drogon::k406NotAcceptable, "Username must contain at least 4 characters")));
-    if (username.size() > 128)
-        return (callback(jsonError(drogon::k406NotAcceptable, "Username cannot exceed 128 characters")));
+    // qua dovrei fare i controlli per il nome e la password lunghezza caratteri speciali etc...
 
-    // Validate password
-    if (password.size() < 13)
-        return (callback(jsonError(drogon::k406NotAcceptable, "Password must contain at least 13 characters")));
-    if (password.size() > 128)
-        return (callback(jsonError(drogon::k406NotAcceptable, "Password cannot exceed 128 characters")));
+    auto userId = co_await registerUserWithInviteAsync(username, password, token);
+
+    if (!userId)
+        co_return (callback(jsonError(drogon::k403Forbidden, "Invalid invite token or username already in use")));
+
+    LOG_INFO << "New registered user=" << username << " id=" << static_cast<Json::Int64>(*userId);
+    Json::Value responseJson;
+    responseJson["status"] = "ok";
+    responseJson["username"] = username;
+    responseJson["id"] = static_cast<Json::Int64>(*userId);
+    auto response = drogon::HttpResponse::newHttpJsonResponse(responseJson);
+    response->setStatusCode(drogon::k201Created);
+    callback(response);
+
+}
+
+drogon::Task<std::optional<std::int64_t>>
+UserController::registerUserWithInviteAsync(std::string_view username, std::string_view password, std::string_view Token)
+{
+    const std::string tokenHash = hashInviteToken(Token);
+    auto transaction = co_await m_db->newTransactionCoro();
 
     try
     {
-        // Read the special registration user
-        auto masterUser = findUser("register_new_user");
-        if (!masterUser)
-            return (callback(jsonError(drogon::k500InternalServerError, "Internal server error")));
-        if (!verifyPassword(masterPassword, masterUser->passwordHash))
-            return (callback(jsonError(drogon::k401Unauthorized, "Wrong master password")));
+        const auto now = std::chrono::system_clock::now();
+        const auto nowSeconds =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                now.time_since_epoch())
+                .count();
 
-        // Hash the new user's password
+        auto result = co_await transaction->execSqlCoro(
+            R"(
+                UPDATE invite_tokens
+                SET uses_left = uses_left - 1
+                WHERE token_hash = ?
+                AND enabled = 1
+                AND uses_left > 0
+                AND (expires_at IS NULL OR expires_at > ?)
+            )",
+            tokenHash,
+            nowSeconds);
+
+        if (result.affectedRows() != 1)
+        {
+            transaction->rollback();
+            co_return (std::nullopt);
+        }
+
         const std::string passwordHash = hashPassword(password);
-        auto newUserId = insertUser(username, passwordHash);
-        if (!newUserId)
-            return (callback(jsonError(drogon::k409Conflict, "Username already in use")));
 
-        LOG_INFO << "New registered user=" << username << " id=" << static_cast<Json::Int64>(*newUserId);
-        Json::Value responseJson;
-        responseJson["status"] = "ok";
-        responseJson["username"] = username;
-        responseJson["id"] = static_cast<Json::Int64>(*newUserId);
-        auto response = drogon::HttpResponse::newHttpJsonResponse(responseJson);
-        response->setStatusCode(drogon::k201Created);
-        callback(response);
+        auto insertResult = co_await transaction->execSqlCoro(
+            R"(
+                INSERT INTO users(username, password_hash, created_at)
+                VALUES (?, ?, ?)
+            )",
+            username,
+            passwordHash,
+            nowSeconds);
+
+        const auto userId = static_cast<std::int64_t>(insertResult.insertId());
+
+        co_await transaction->execSqlCoro(
+            R"(
+                DELETE FROM invite_tokens
+                WHERE token_hash = ?
+                  AND uses_left <= 0
+            )",
+            tokenHash);
+
+        co_return (userId);
     }
-    catch (const std::exception &e)
+    catch (const drogon::orm::DrogonDbException &e)
     {
-        LOG_ERROR << "createNewUser failed: " << e.what();
-        callback(jsonError(drogon::k500InternalServerError, "Internal server error"));
+        transaction->rollback();
+
+        LOG_ERROR << e.base().what();
+
+        co_return (std::nullopt);
     }
 }
 
@@ -387,41 +499,44 @@ void UserController::createNewUser(const drogon::HttpRequestPtr &req, Callback &
 // Login
 // -----------------------------------------------------------------------------
 
-void UserController::login(const drogon::HttpRequestPtr &req, Callback
-	&&callback)
+drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callback)
 {
 	auto json = req->getJsonObject();
 	if (!json || !json->isObject())
-		return (callback(jsonError(drogon::k400BadRequest, "Invalid JSON body")));
+		co_return (callback(jsonError(drogon::k400BadRequest, "Invalid JSON body")));
 	if (!json->isMember("username") || !json->isMember("password"))
-		return (callback(jsonError(drogon::k400BadRequest, "Missing user or password")));
+		co_return (callback(jsonError(drogon::k400BadRequest, "Missing user or password")));
 	if (!(*json)["username"].isString() || !(*json)["password"].isString())
-		return (callback(jsonError(drogon::k400BadRequest, "user and password must be strings")));
+		co_return (callback(jsonError(drogon::k400BadRequest, "user and password must be strings")));
 
 	const std::string username = (*json)["username"].asString();
 	std::string password = (*json)["password"].asString();
 	if (username.empty() || username.size() > 128 ||
         password.empty() || password.size() > 128)
-		return (callback(jsonError(drogon::k400BadRequest, "Invalid username or password")));
+		co_return (callback(jsonError(drogon::k400BadRequest, "Invalid username or password")));
 
 	try
 	{
-		auto user = findUser(username);
-		if (!user || user->id == 0)
-			return (callback(jsonError(drogon::k401Unauthorized, "Invalid username or password")));
-		if (!verifyPassword(password, user->passwordHash))
-			return (callback(jsonError(drogon::k401Unauthorized, "Invalid username or password")));
+		auto user = co_await findUserAsync(username);
+
+        const bool userExist = user.has_value() && user->getValueOfId() == 0;
+        const std::string &passwordHash =
+            userExist ? user->getValueOfPasswordHash() : m_dummyPasswordHash;
+        const bool passwordValid = verifyPassword(password, passwordHash);
+
+        if (!userExist || ! passwordValid)
+            co_return (callback(jsonError(drogon::k401Unauthorized, "Invalid username or password")));
 
 		auto session = req->session();
 		session->clear();
 		session->changeSessionIdToClient();
 		session->insert("authenticated", true);
-		session->insert("user_id", user->id);
-		session->insert("username", user->username);
+		session->insert("user_id", user->getValueOfId());
+		session->insert("username", user->getValueOfUsername());
 		Json::Value responseJson;
 		responseJson["status"] = "ok";
-		responseJson["username"] = user->username;
-		responseJson["id"] = static_cast<Json::Int64>(user->id);
+		responseJson["username"] = user->getValueOfUsername();
+		responseJson["id"] = static_cast<Json::Int64>(user->getValueOfId());
 		auto response = drogon::HttpResponse::newHttpJsonResponse(responseJson);
 		response->setStatusCode(drogon::k200OK);
 		callback(response);
@@ -453,4 +568,14 @@ void UserController::logout(const drogon::HttpRequestPtr &req, Callback &&callba
     response->setStatusCode(drogon::k200OK);
 
     callback(response);
+}
+
+bool UserController::needBootStrap()
+{
+    using namespace drogon::orm;
+    using namespace drogon_model::sqlite3;
+
+    Mapper<Users> mapper(m_db);
+
+    return (mapper.count() == 0);
 }

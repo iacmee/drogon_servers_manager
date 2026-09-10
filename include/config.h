@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <json/json.h>
 
 namespace paperpilot
 {
@@ -47,6 +48,8 @@ struct Config
     SessionConfig session;
 
     std::vector<ManagedServer> servers;
+
+    Json::Value plugins{Json::arrayValue};
 
 
     static Config load(const std::string &filename);

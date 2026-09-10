@@ -10,9 +10,7 @@ namespace paperpilot
         std::string requireString(const Json::Value &obj, const char *name)
         {
             if (!obj.isMember(name) || !obj[name].isString())
-            {
                 throw std::runtime_error(std::string("Parametro mancante/non valido: ") + name);
-            }
             return (obj[name].asString());
         }
 
@@ -21,9 +19,7 @@ namespace paperpilot
             if (!obj.isMember(name))
                 return (defaultValue);
             if (!obj[name].isBool())
-            {
                 throw std::runtime_error(std::string("Parametro booleano non valido: ") + name);
-            }
             return (obj[name].asBool());
         }
 
@@ -33,9 +29,7 @@ namespace paperpilot
             if (!obj.isMember(name))
                 return (defaultValue);
             if (!obj[name].isUInt())
-            {
                 throw std::runtime_error(std::string("Parametro numerico non valido: ") + name);
-            }
             return (obj[name].asUInt());
         }
 
@@ -45,23 +39,19 @@ namespace paperpilot
     {
         std::ifstream file(filename);
         if (!file)
-        {
             throw std::runtime_error("Impossibile aprire configurazione: " + filename);
-        }
 
         Config cfg;
         ManagedServer server;
         Json::CharReaderBuilder builder;
         Json::Value root;
         std::string errors;
+
         if (!Json::parseFromStream(builder, file, &root, &errors))
-        {
             throw std::runtime_error("Errore parsing JSON:\n" + errors);
-        }
         if (!root.isMember("app") || !root["app"].isObject())
-        {
             throw std::runtime_error("Sezione 'app' mancante");
-        }
+
         const auto &app = root["app"];
         const int port = app.get("port", 8443).asInt();
         // -------------------------
@@ -117,6 +107,17 @@ namespace paperpilot
                 server.log = requireString(item, "log");
                 cfg.servers.push_back(std::move(server));
             }
+        }
+        // -------------------------
+        // PLUGINS
+        // -------------------------
+        if (root.isMember("plugins"))
+        {
+            if (!root["plugins"].isArray())
+                throw std::runtime_error(
+                    "'plugins' deve essere un array");
+
+            cfg.plugins = root["plugins"];
         }
         return (cfg);
     }

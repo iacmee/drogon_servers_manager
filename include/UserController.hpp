@@ -1,65 +1,25 @@
 #pragma once
 
-// #include <drogon/HttpController.h>
-// #include <sodium.h>
-// #include <sqlite3.h>
-
-
-// class UserController : public drogon::HttpController<UserController, false>
-// {
-//   public:
-// 	explicit UserController(const std::string &databaseFile);
-
-// 	~UserController();
-
-// 	METHOD_LIST_BEGIN
-
-// 	ADD_METHOD_TO(UserController::login, "/api/login", drogon::Post);
-
-// 	ADD_METHOD_TO(UserController::logout, "/api/logout", drogon::Post);
-
-//     ADD_METHOD_TO(UserController::createNewUser, "/api/register", drogon::Post);
-
-// 	METHOD_LIST_END
-
-// 	void login(const drogon::HttpRequestPtr &req,
-// 		std::function<void(const drogon::HttpResponsePtr &)> &&callback);
-
-// 	void logout(const drogon::HttpRequestPtr &req,
-// 		std::function<void(const drogon::HttpResponsePtr &)> &&callback);
-
-// 	void createNewUser(const drogon::HttpRequestPtr &req,
-// 		std::function<void(const drogon::HttpResponsePtr &)> &&callback);
-
-//   private:
-// 	sqlite3 *m_db;
-
-//     int readUserFromDb(const std::string &username, std::int64_t *id, std::string *pHash, std::int64_t *created_at);
-
-// };
-#pragma once
-
+#include "InviteTokens.h"
+#include "Users.h"
+#include <drogon/drogon.h>
+#include <chrono>
 #include <cstdint>
-#include <drogon/HttpController.h>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <array>
 
-// Forward declaration.
-// sqlite3.h is only needed in the .cpp file.
-struct sqlite3;
 
-class UserController : public drogon::HttpController<UserController, false>
+
+class UserController : public drogon::HttpController<UserController>
 {
   public:
 	using Callback = std::function<void(const drogon::HttpResponsePtr &)>;
 
-	UserController(const std::string &databaseFile);
-	UserController(const UserController &) = delete;
-	UserController &operator=(const UserController &) = delete;
-
-    ~UserController();
+	UserController();
+    void start(drogon::orm::DbClientPtr db);
 
 	METHOD_LIST_BEGIN
 
@@ -69,25 +29,33 @@ class UserController : public drogon::HttpController<UserController, false>
 
 	METHOD_LIST_END
 
-	void login(const drogon::HttpRequestPtr &req, Callback &&callback);
+	drogon::Task<> login(drogon::HttpRequestPtr req, Callback callback);
+	drogon::Task<> createNewUser(drogon::HttpRequestPtr req, Callback callback);
 	void logout(const drogon::HttpRequestPtr &req, Callback &&callback);
-	void createNewUser(const drogon::HttpRequestPtr &req, Callback &&callback);
 
   private:
-    sqlite3 *m_db{nullptr};
-    bool m_isRegistrationOn{false};
-
-	struct	UserRecord
-	{
-		std::int64_t id{};
-		std::string username;
-		std::string passwordHash;
-		std::int64_t createdAt{};
-	};
+    drogon::orm::DbClientPtr m_db;
+    std::string m_dummyPasswordHash;
 
 	void initializeDatabase();
-	std::optional<UserRecord> findUser(std::string_view username);
-	std::optional<std::int64_t> insertUser(std::string_view username, std::string_view passwordHash);
+    std::string generateInviteToken();
+    std::string hashInviteToken(std::string_view token);
+    bool needBootStrap();
+    bool verifyInviteToken(drogon_model::sqlite3::InviteTokens &inviteTokens);
+    void useInviteToken(drogon_model::sqlite3::InviteTokens &inviteToken);
+
+    drogon::Task<std::optional<drogon_model::sqlite3::InviteTokens>> findInviteTokenAsync(const std::string &tokenHash);
+    drogon::Task<std::optional<drogon_model::sqlite3::Users>> findUserAsync(const std::string &username);
+	drogon::Task<std::optional<std::int64_t>> insertUserAsync(std::string_view username, std::string_view passwordHash);
+    drogon::Task<std::optional<std::int64_t>> registerUserWithInviteAsync(std::string_view username,
+        std::string_view password, std::string_view tokenHash);
+
+    std::optional<drogon_model::sqlite3::Users> findUser(const std::string &username);
+	std::optional<std::int64_t> insertUser(std::string_view username, std::string_view password);
+    std::optional<drogon_model::sqlite3::InviteTokens> findInviteToken(const std::string &tokenHash);
+    std::optional<std::int64_t> insertInviteToken(const std::string &tokenHash, int times,
+        std::optional<std::chrono::seconds> lifetime);
+
 	static bool verifyPassword(std::string_view password, const std::string &storedHash);
 	static std::string hashPassword(std::string_view password);
 	static drogon::HttpResponsePtr jsonError(drogon::HttpStatusCode status, std::string_view message);
