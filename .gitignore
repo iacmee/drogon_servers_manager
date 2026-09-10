@@ -1,2 +1,4 @@
 /build/
 /certs/
+
+obj/main.o
