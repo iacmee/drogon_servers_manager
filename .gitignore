@@ -6,3 +6,10 @@ obj/main.o
 /obj/
 .vscode
 logs
+
+/db/
+
+import/
+
+servers_manager
+TODO

@@ -55,11 +55,11 @@
 
   "servers": [
         {
-            "id": "letsgoo",
-            "name": "Letsgoo",
-            "directory": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo",
-            "service": "minecraft@letsgoo.service",
-            "log": "/home/iacme/Downloads/PaperPilot-1.0.0/letsgoo/logs/latest.log"
+            "id" : 1,
+            "name": "test_server",
+            "directory": "/home/iacme/Desktop/https/import/letsgoo",
+            "service": "minecraft_server_blueprint.service",
+            "logPath": "/home/iacme/Desktop/https/import/logs/latest.log"
         }
     ]
 }

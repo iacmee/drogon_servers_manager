@@ -1,8 +1,9 @@
 CXX := g++
-CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -O2
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -O2 -g
 CXXFLAGS += -Iinclude -Imodels
 CXXFLAGS += $(shell pkg-config --cflags jsoncpp) 
 CXXFLAGS += $(shell pkg-config --cflags libsodium)
+CXXFLAGS += $(shell pkg-config --cflags libsystemd)
 
 TARGET := servers_manager
 
@@ -14,6 +15,7 @@ OBJECTS += $(MODEL_SOURCES:models/%.cc=obj/models/%.o)
 LIBS := -L/usr/local/lib -ldrogon -ltrantor $(shell pkg-config --libs jsoncpp)
 LIBS += $(shell pkg-config --libs sqlite3)
 LIBS += $(shell pkg-config --libs libsodium)
+LIBS += $(shell pkg-config --libs libsystemd)
 
 .PHONY: all run cert clean
 
@@ -34,6 +36,11 @@ run r: all
 	./$(TARGET) config/config.json
 
 re: clean all
+
+#questa regola sarà da togliere
+reset_db:
+	rm db/database.db
+	touch db/database.db
 
 clean:
 	rm -rf $(OBJ_DIR)

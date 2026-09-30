@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <json/json.h>
+#include "ManagedServer.hpp"
+#include <drogon/drogon.h>
 
 namespace paperpilot
 {
@@ -24,17 +26,6 @@ struct SessionConfig
 };
 
 
-struct ManagedServer
-{
-    std::string id;
-    std::string name;
-
-    std::string directory;
-    std::string service;
-    std::string log;
-};
-
-
 struct Config
 {
     std::string bind{"127.0.0.1"};
@@ -48,11 +39,11 @@ struct Config
     SessionConfig session;
 
     std::vector<ManagedServer> servers;
-
     Json::Value plugins{Json::arrayValue};
-
-
     static Config load(const std::string &filename);
 };
 
+
 }
+
+drogon::HttpResponsePtr jsonError(drogon::HttpStatusCode status, std::string_view message);

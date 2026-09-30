@@ -383,8 +383,7 @@ bool UserController::verifyPassword(std::string_view password,
 // JSON error helper
 // -----------------------------------------------------------------------------
 
-drogon::HttpResponsePtr UserController::jsonError(drogon::HttpStatusCode status,
-                                                  std::string_view message)
+drogon::HttpResponsePtr jsonError(drogon::HttpStatusCode status, std::string_view message)
 {
     Json::Value json;
     json["error"] = std::string(message);
@@ -519,12 +518,12 @@ drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callba
 	{
 		auto user = co_await findUserAsync(username);
 
-        const bool userExist = user.has_value() && user->getValueOfId() == 0;
+        const bool userExist = user.has_value();
         const std::string &passwordHash =
             userExist ? user->getValueOfPasswordHash() : m_dummyPasswordHash;
         const bool passwordValid = verifyPassword(password, passwordHash);
 
-        if (!userExist || ! passwordValid)
+        if (!userExist || !passwordValid)
             co_return (callback(jsonError(drogon::k401Unauthorized, "Invalid username or password")));
 
 		auto session = req->session();

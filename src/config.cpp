@@ -13,6 +13,14 @@ namespace paperpilot
                 throw std::runtime_error(std::string("Parametro mancante/non valido: ") + name);
             return (obj[name].asString());
         }
+        
+        std::int64_t requireInt64(const Json::Value &obj, const char *name)
+        {
+            if (!obj.isMember(name) || !obj[name].isInt64())
+                throw std::runtime_error(std::string("Parametro mancante/non valido: ") + name);
+
+            return (obj[name].asInt64());
+        }
 
         bool getBool(const Json::Value &obj, const char *name, bool defaultValue)
         {
@@ -39,10 +47,9 @@ namespace paperpilot
     {
         std::ifstream file(filename);
         if (!file)
-            throw std::runtime_error("Impossibile aprire configurazione: " + filename);
+            throw std::runtime_error("Impossibile aprire configurazione: " + filename); 
 
         Config cfg;
-        ManagedServer server;
         Json::CharReaderBuilder builder;
         Json::Value root;
         std::string errors;
@@ -100,12 +107,9 @@ namespace paperpilot
             }
             for (const auto &item : root["servers"])
             {
-                server.id = requireString(item, "id");
-                server.name = requireString(item, "name");
-                server.directory = requireString(item, "directory");
-                server.service = requireString(item, "service");
-                server.log = requireString(item, "log");
-                cfg.servers.push_back(std::move(server));
+                cfg.servers.emplace_back(requireInt64(item, "id"),
+                    requireString(item, "name"), requireString(item, "directory"),
+                    requireString(item, "service"), requireString(item, "logPath"));
             }
         }
         // -------------------------

@@ -58,5 +58,4 @@ class UserController : public drogon::HttpController<UserController>
 
 	static bool verifyPassword(std::string_view password, const std::string &storedHash);
 	static std::string hashPassword(std::string_view password);
-	static drogon::HttpResponsePtr jsonError(drogon::HttpStatusCode status, std::string_view message);
 };
