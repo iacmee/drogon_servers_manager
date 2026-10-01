@@ -43,7 +43,7 @@ namespace paperpilot
 
     } // namespace
 
-    Config Config::load(const std::string &filename)
+    Config Config::load(const std::string &filename, SdBusProvider &sdBusProvider)
     {
         std::ifstream file(filename);
         if (!file)
@@ -109,7 +109,7 @@ namespace paperpilot
             {
                 cfg.servers.emplace_back(requireInt64(item, "id"),
                     requireString(item, "name"), requireString(item, "directory"),
-                    requireString(item, "service"), requireString(item, "logPath"));
+                    requireString(item, "service"), requireString(item, "logPath"), sdBusProvider);
             }
         }
         // -------------------------

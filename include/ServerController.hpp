@@ -2,14 +2,14 @@
 
 #include <drogon/drogon.h>
 #include "config.h"
-#include "ManagedServer.hpp"
+#include "MinecraftServer.hpp"
 
 class ServerController : public drogon::HttpController<ServerController, false>
 {
   public:
 	using Callback = std::function<void(const drogon::HttpResponsePtr &)>;
 
-    ServerController(const std::vector<ManagedServer> &servers, std::shared_ptr<SystemdManager>);
+    ServerController(std::vector<MinecraftServer> servers);
 
 	METHOD_LIST_BEGIN
 
@@ -26,9 +26,8 @@ class ServerController : public drogon::HttpController<ServerController, false>
     void restartServer(const drogon::HttpRequestPtr &req, Callback &&callback, std::int64_t id);
 
   private:
-    ManagedServer *findServer(std::int64_t id);
+    MinecraftServer *findServer(std::int64_t id);
 
   private:
-    std::vector<ManagedServer> m_servers;
-    std::shared_ptr<SystemdManager> m_systemdManager;
+    std::vector<MinecraftServer> m_servers;
 };

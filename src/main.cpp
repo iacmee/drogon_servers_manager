@@ -38,10 +38,9 @@ void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Confi
 }
 
 void registerControllers(drogon::HttpAppFramework &app,
-    const paperpilot::Config &config,
-    std::shared_ptr<SystemdManager> systemdManager)
+    paperpilot::Config &config)
 {
-    auto serverController = std::make_shared<ServerController>(config.servers, systemdManager);
+    auto serverController = std::make_shared<ServerController>(std::move(config.servers));
     app.registerController(serverController);
 }
 
@@ -89,19 +88,15 @@ int main(int argc, char *argv[])
 {
     try
     {
+        SdBusProvider SdBusProvider;
         const std::string configFile = argc > 1 ? argv[1] : "config/config.json";
-        const auto config = paperpilot::Config::load(configFile);
+        auto config = paperpilot::Config::load(configFile, SdBusProvider);
         validatePaths(config);
 
         auto &app = drogon::app();
-        auto systemdManager = std::make_shared<SystemdManager>();
         configureApplication(app, config);
-        registerControllers(app, config, systemdManager);
+        registerControllers(app, config);
         app.registerBeginningAdvice(configureHodor);
-        app.registerBeginningAdvice([systemdManager]()
-        {
-            systemdManager->start(drogon::app().getLoop());
-        });
         configureListener(app, config);
 
         std::cout << "Bind: https://" << config.bind << ":" << config.port << "\n";

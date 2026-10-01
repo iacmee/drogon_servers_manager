@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <json/json.h>
-#include "ManagedServer.hpp"
+#include "MinecraftServer.hpp"
 #include <drogon/drogon.h>
 
 namespace paperpilot
@@ -38,9 +38,9 @@ struct Config
     HttpsConfig https;
     SessionConfig session;
 
-    std::vector<ManagedServer> servers;
+    std::vector<MinecraftServer> servers;
     Json::Value plugins{Json::arrayValue};
-    static Config load(const std::string &filename);
+    static Config load(const std::string &filename, SdBusProvider &sdBusProvider);
 };
 
 
