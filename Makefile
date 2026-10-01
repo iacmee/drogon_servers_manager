@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -O2 -g
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -O2
 CXXFLAGS += -Iinclude -Imodels
 CXXFLAGS += $(shell pkg-config --cflags jsoncpp) 
 CXXFLAGS += $(shell pkg-config --cflags libsodium)
@@ -39,8 +39,8 @@ re: clean all
 
 #questa regola sarà da togliere
 reset_db:
-	rm db/database.db
-	touch db/database.db
+	rm -f db/database.db
+	mkdir -p db/ && touch db/database.db
 
 clean:
 	rm -rf $(OBJ_DIR)
