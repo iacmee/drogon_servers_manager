@@ -1,8 +1,20 @@
 #include "SdBusProvider.hpp"
+#include <stdexcept>
+
+void SdBusProvider::initialize()
+{
+	if (m_connection)
+		throw std::logic_error("SdBusProvider already initialized");
+
+	m_connection = std::make_unique<Storage>();
+}
 
 SdBusConnection &SdBusProvider::current()
 {
-	auto &bus = m_connection.getThreadData();
+	if (!m_connection)
+		throw std::logic_error("SdBusProvider not initialized");
+
+	auto &bus = m_connection->getThreadData();
 
 	if (!bus)
 	{

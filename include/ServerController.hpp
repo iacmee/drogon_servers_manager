@@ -9,7 +9,7 @@ class ServerController : public drogon::HttpController<ServerController, false>
   public:
 	using Callback = std::function<void(const drogon::HttpResponsePtr &)>;
 
-    ServerController(std::vector<MinecraftServer> servers);
+    ServerController(std::shared_ptr<std::vector<MinecraftServer>> servers);
 
 	METHOD_LIST_BEGIN
 
@@ -29,5 +29,5 @@ class ServerController : public drogon::HttpController<ServerController, false>
     MinecraftServer *findServer(std::int64_t id);
 
   private:
-    std::vector<MinecraftServer> m_servers;
+    std::shared_ptr<std::vector<MinecraftServer>> m_servers;
 };

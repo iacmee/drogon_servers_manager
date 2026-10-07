@@ -38,9 +38,9 @@ void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Confi
 }
 
 void registerControllers(drogon::HttpAppFramework &app,
-    paperpilot::Config &config)
+    std::shared_ptr<std::vector<MinecraftServer>> servers)
 {
-    auto serverController = std::make_shared<ServerController>(std::move(config.servers));
+    auto serverController = std::make_shared<ServerController>(servers);
     app.registerController(serverController);
 }
 
@@ -92,11 +92,20 @@ int main(int argc, char *argv[])
         const std::string configFile = argc > 1 ? argv[1] : "config/config.json";
         auto config = paperpilot::Config::load(configFile, SdBusProvider);
         validatePaths(config);
+        auto servers = std::make_shared<std::vector<MinecraftServer>>(std::move(config.servers));
 
         auto &app = drogon::app();
         configureApplication(app, config);
-        registerControllers(app, config);
+        SdBusProvider.initialize();
+        registerControllers(app, servers);
         app.registerBeginningAdvice(configureHodor);
+        app.registerBeginningAdvice(
+            [servers]()
+            {
+                for (std::size_t i = 0; i < servers->size(); ++i)
+                    (*servers)[i].startMonitorOnState();
+            }
+        );
         configureListener(app, config);
 
         std::cout << "Bind: https://" << config.bind << ":" << config.port << "\n";

@@ -14,6 +14,8 @@ class MinecraftServer
 	static constexpr const char *SYSTEMD_DESTINATION = "org.freedesktop.systemd1";
 	static constexpr const char *SYSTEMD_PATH = "/org/freedesktop/systemd1";
 	static constexpr const char *SYSTEMD_MANAGER_INTERFACE = "org.freedesktop.systemd1.Manager";
+	static constexpr const char *SYSTEMD_UNIT_INTERFACE = "org.freedesktop.systemd1.Unit";
+	static constexpr const char *DBUS_PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties";
 
   public:
 	enum class ServerState
@@ -22,7 +24,8 @@ class MinecraftServer
 		Starting,
 		Running,
 		Stopping,
-		Failed
+		Failed,
+        Unknown
 	};
 
   public:
@@ -38,6 +41,9 @@ class MinecraftServer
 	void stop(Callback &&callback);
 	void restart(Callback &&callback);
 
+    int startMonitorOnState();
+    const char *statusToString() const;
+
   private:
     enum class UnitAction
     {
@@ -47,9 +53,9 @@ class MinecraftServer
     };
 
   private:
-	void updateObjectPath();
-    static int callbackStart(sd_bus_message *m, void *userdata, sd_bus_error *ret_error);
+	int updateObjectPath(bool performInAsync);
     void executeUnitAction(UnitAction action, Callback &&callback);
+    void updateStateFromString(const char *state);
 
 
 
@@ -64,4 +70,5 @@ class MinecraftServer
   private:
 	std::string m_objectPath;
 	SdBusProvider &m_sdBusProvider;
+    std::mutex m_mutex; // usato per aggiornare m_objjectPath
 };

@@ -1,6 +1,6 @@
 #include "ServerController.hpp"
 
-ServerController::ServerController(std::vector<MinecraftServer> servers) : m_servers(std::move(servers))
+ServerController::ServerController(std::shared_ptr<std::vector<MinecraftServer>> servers) : m_servers(std::move(servers))
 {
 }
 
@@ -11,11 +11,12 @@ void ServerController::listServers(const drogon::HttpRequestPtr &req, Callback &
 
     responseJson["status"] = "ok";
 
-    for (const auto &server : m_servers)
+    for (const auto &server : *m_servers)
     {
         Json::Value serverJson;
 
         serverJson["id"] = static_cast<Json::Int64>(server.m_id);
+        serverJson["status"] = server.statusToString();
         serverJson["name"] = server.m_name;
 
         serversJson.append(serverJson);
@@ -32,7 +33,7 @@ void ServerController::listServers(const drogon::HttpRequestPtr &req, Callback &
 
 MinecraftServer *ServerController::findServer(std::int64_t id)
 {
-    for (auto& server : m_servers)
+    for (auto& server : *m_servers)
     {
         if (server.m_id == id)
             return (&server);
