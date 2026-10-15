@@ -74,6 +74,7 @@ namespace paperpilot
         cfg.documentRoot = requireString(app, "document_root");
         cfg.backupRoot = requireString(app, "backup_root");
         cfg.databaseFile = requireString(app, "database_file");
+        cfg.javaPath = requireString(app, "java_path");
         // -------------------------
         // HTTPS
         // -------------------------
@@ -109,7 +110,8 @@ namespace paperpilot
             {
                 cfg.servers.emplace_back(requireInt64(item, "id"),
                     requireString(item, "name"), requireString(item, "directory"),
-                    requireString(item, "service"), requireString(item, "logPath"), sdBusProvider);
+                    requireString(item, "service"), requireString(item, "logPath"),
+                    requireString(item, "jarPath"), cfg.javaPath, sdBusProvider);
             }
         }
         // -------------------------

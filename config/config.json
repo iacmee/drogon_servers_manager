@@ -3,6 +3,7 @@
         "bind": "127.0.0.1",
         "port": 8443,
         "threads": 2,
+        "java_path": "/usr/bin/java",
         "document_root": "/home/iacme/Desktop/https/static",
         "backup_root": "/home/iacme/Downloads/PaperPilot-1.0.0/backups",
         "database_file": "/home/iacme/Desktop/https/db/database.db",
@@ -57,7 +58,8 @@
         {
             "id" : 1,
             "name": "test_server",
-            "directory": "/home/iacme/Desktop/https/import/letsgoo",
+            "jarPath": "/home/iacme/Desktop/https/import/test_server/paper-26.2-128.jar",
+            "directory": "/home/iacme/Desktop/https/import/test_server",
             "service": "minecraft_server_blueprint.service",
             "logPath": "/home/iacme/Desktop/https/import/logs/latest.log"
         }

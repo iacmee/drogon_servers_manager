@@ -452,3 +452,7 @@ void SdBusConnection::shutdownInLoop()
 }
 
 
+sd_bus *SdBusConnection::getSdBus()
+{
+    return (m_bus);
+}

@@ -6,6 +6,7 @@
 #include <json/json.h>
 #include <string>
 #include <vector>
+#include "MinecraftConsole.hpp"
 
 class MinecraftServer
 {
@@ -31,13 +32,16 @@ class MinecraftServer
   public:
 	MinecraftServer(std::int64_t id, const std::string &name,
 		const std::string &directory, const std::string &service,
-		const std::string &logPath, SdBusProvider &sdBusProvider);
+		const std::string &logPath, const std::string &jarPath,
+		const std::string &javaPath, SdBusProvider &sdBusProvider);
+    ~MinecraftServer();
 	MinecraftServer(MinecraftServer &&other);
 	MinecraftServer(const MinecraftServer &) = delete;
 	MinecraftServer &operator=(const MinecraftServer &) = delete;
 	MinecraftServer &operator=(MinecraftServer &&) = delete;
 
 	void start(Callback &&callback);
+    void startTransient(Callback &&callback);
 	void stop(Callback &&callback);
 	void restart(Callback &&callback);
 
@@ -65,10 +69,15 @@ class MinecraftServer
 	const std::string m_directory;
 	const std::string m_service;
 	const std::string m_logPath;
+    const std::string m_jarPath;
+    const std::string m_javaPath;
+    const std::vector<std::string> m_argv = {m_javaPath, "-jar", m_jarPath, "--nogui"};
 	std::atomic<ServerState> m_state{ServerState::Stopped}; // deve essere atomico
+    MinecraftConsole m_console;
 
   private:
-	std::string m_objectPath;
-	SdBusProvider &m_sdBusProvider;
-    std::mutex m_mutex; // usato per aggiornare m_objjectPath
+    std::string m_objectPath;
+    SdBusProvider &m_sdBusProvider;
+    std::mutex m_mutex; // usato per aggiornare m_objectPath
+    std::atomic<bool> monitorStarted{false};
 };

@@ -12,6 +12,7 @@ MODEL_SOURCES := $(shell find models -type f -name '*.cc')
 OBJ_DIR := obj/
 OBJECTS := $(SOURCES:src/%.cpp=obj/%.o)
 OBJECTS += $(MODEL_SOURCES:models/%.cc=obj/models/%.o)
+DEPFILES := $(OBJECTS:.o=.d)
 LIBS := -L/usr/local/lib -ldrogon -ltrantor $(shell pkg-config --libs jsoncpp)
 LIBS += $(shell pkg-config --libs sqlite3)
 LIBS += $(shell pkg-config --libs libsodium)
@@ -26,11 +27,13 @@ $(TARGET): $(OBJECTS)
 
 $(OBJ_DIR)%.o: src/%.cpp
 	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 $(OBJ_DIR)models/%.o: models/%.cc
 	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+-include $(DEPFILES)
 
 run r: all
 	./$(TARGET) config/config.json
@@ -45,4 +48,3 @@ reset_db:
 clean:
 	rm -rf $(OBJ_DIR)
 	rm -rf $(TARGET)
-

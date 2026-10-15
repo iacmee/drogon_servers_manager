@@ -4,7 +4,6 @@
 #include <json/json.h>
 #include <string>
 #include <vector>
-#include "SystemdManager.hpp"
 
 class ManagedServer
 {

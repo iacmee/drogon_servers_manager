@@ -1,7 +1,7 @@
 #include "config.h"
 #include "UserController.hpp"
 #include "ServerController.hpp"
-#include "SystemdManager.hpp"
+#include "WebSocketTest.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -42,6 +42,9 @@ void registerControllers(drogon::HttpAppFramework &app,
 {
     auto serverController = std::make_shared<ServerController>(servers);
     app.registerController(serverController);
+
+    auto webSocketController = std::make_shared<WebSocketTest>(servers);
+    app.registerController(webSocketController);
 }
 
 std::optional<std::string> getLoginUsername(const drogon::HttpRequestPtr &req)
@@ -99,13 +102,13 @@ int main(int argc, char *argv[])
         SdBusProvider.initialize();
         registerControllers(app, servers);
         app.registerBeginningAdvice(configureHodor);
-        app.registerBeginningAdvice(
-            [servers]()
-            {
-                for (std::size_t i = 0; i < servers->size(); ++i)
-                    (*servers)[i].startMonitorOnState();
-            }
-        );
+        // app.registerBeginningAdvice(
+        //     [servers]()
+        //     {
+        //         for (std::size_t i = 0; i < servers->size(); ++i)
+        //             (*servers)[i].startMonitorOnState();
+        //     }
+        // );
         configureListener(app, config);
 
         std::cout << "Bind: https://" << config.bind << ":" << config.port << "\n";

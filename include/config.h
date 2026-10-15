@@ -34,6 +34,7 @@ struct Config
     std::string documentRoot;
     std::string backupRoot;
     std::string databaseFile;
+    std::string javaPath;
 
     HttpsConfig https;
     SessionConfig session;
