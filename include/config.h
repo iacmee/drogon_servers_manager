@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <json/json.h>
 #include "MinecraftServer.hpp"
 #include <drogon/drogon.h>
 
