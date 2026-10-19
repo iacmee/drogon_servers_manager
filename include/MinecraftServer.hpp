@@ -3,7 +3,6 @@
 #include "SdBusProvider.hpp"
 #include <atomic>
 #include <cstdint>
-#include <json/json.h>
 #include <string>
 #include <vector>
 #include "MinecraftConsole.hpp"
