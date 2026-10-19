@@ -1,9 +1,11 @@
 #include "config.h"
 #include "UserController.hpp"
 #include "ServerController.hpp"
-#include "WebSocketTest.hpp"
+#include "ConsoleWebSocketController.hpp"
+#include "ServersWebSocketController.hpp"
 
 #include <filesystem>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -38,13 +40,46 @@ void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Confi
 }
 
 void registerControllers(drogon::HttpAppFramework &app,
-    std::shared_ptr<std::vector<MinecraftServer>> servers)
+    std::shared_ptr<std::vector<MinecraftServer>> servers,
+    SdBusProvider &provider)
 {
     auto serverController = std::make_shared<ServerController>(servers);
     app.registerController(serverController);
 
-    auto webSocketController = std::make_shared<WebSocketTest>(servers);
+    auto webSocketController = std::make_shared<ConsoleWebSocketController>(servers);
     app.registerController(webSocketController);
+
+    auto statusController = std::make_shared<ServersWebSocketController>(servers);
+    app.registerController(statusController);
+    app.registerBeginningAdvice([servers, &provider, weak = std::weak_ptr<ServersWebSocketController>(statusController)]
+    {
+        // Subscribe once on the main event loop's connection.
+        auto &bus = provider.current();
+        const int r = bus.callMethod(
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager",
+            "Subscribe",
+            [](sd_bus_message *) {},
+            nullptr);
+
+        if (r < 0)
+        {
+            LOG_ERROR << "systemd Subscribe: " << std::strerror(-r);
+            return;
+        }
+
+        for (auto &server : *servers)
+        {
+            server.setStateCallback([weak, id = server.m_id](const char *status)
+            {
+                if (auto controller = weak.lock())
+                    controller->broadcastStatus(id, status);
+            });
+            if (server.startMonitorOnState() < 0)
+                LOG_ERROR << "Cannot monitor server " << server.m_id;
+        }
+    });
 }
 
 std::optional<std::string> getLoginUsername(const drogon::HttpRequestPtr &req)
@@ -100,15 +135,8 @@ int main(int argc, char *argv[])
         auto &app = drogon::app();
         configureApplication(app, config);
         SdBusProvider.initialize();
-        registerControllers(app, servers);
+        registerControllers(app, servers, SdBusProvider);
         app.registerBeginningAdvice(configureHodor);
-        // app.registerBeginningAdvice(
-        //     [servers]()
-        //     {
-        //         for (std::size_t i = 0; i < servers->size(); ++i)
-        //             (*servers)[i].startMonitorOnState();
-        //     }
-        // );
         configureListener(app, config);
 
         std::cout << "Bind: https://" << config.bind << ":" << config.port << "\n";

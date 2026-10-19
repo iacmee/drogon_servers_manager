@@ -14,6 +14,7 @@ MinecraftServer::MinecraftServer(std::int64_t id, const std::string &name,
 	m_sdBusProvider(sdBusProvider)
 {
     m_state.store(ServerState::Unknown, std::memory_order_relaxed);
+    LOG_DEBUG << "Server : " << m_name << " created"; 
 }
 
 MinecraftServer::MinecraftServer(MinecraftServer &&other)
@@ -24,33 +25,115 @@ MinecraftServer::MinecraftServer(MinecraftServer &&other)
       m_objectPath(std::move(other.m_objectPath)),
       m_sdBusProvider(other.m_sdBusProvider)
 {
+    LOG_DEBUG << "Chiamato il move consructor";
 }
 
 MinecraftServer::~MinecraftServer()
 {
-    executeUnitAction(UnitAction::Stop, [](const drogon::HttpResponsePtr &){});
+    LOG_DEBUG << "MinecraftServer destroyed";
+    // executeUnitAction(UnitAction::Stop, [](const drogon::HttpResponsePtr &){});
 
-    LOG_DEBUG << "MinecraftServer destroyd";
 }
 
 void MinecraftServer::start(Callback &&callback)
 {
-    // executeUnitAction(UnitAction::Start, std::move(callback));
+    drogon::app().getLoop()->queueInLoop(
+        [this, callback = std::move(callback)]() mutable
+        {
+            startOnMainLoop(std::move(callback));
+        });
+}
+
+void MinecraftServer::startOnMainLoop(Callback &&callback)
+{
+    drogon::app().getLoop()->assertInLoopThread();
+    const auto state = m_state.load(std::memory_order_relaxed);
+    if (m_startInProgress || state == ServerState::Starting ||
+        state == ServerState::Running || state == ServerState::Stopping)
+    {
+        Json::Value json;
+        json["server_name"] = m_name;
+        json["action"] = "start";
+        json["success"] = state == ServerState::Running;
+        json["note"] = state == ServerState::Running ? "already running" : "operation in progress";
+        auto response = drogon::HttpResponse::newHttpJsonResponse(json);
+        response->setStatusCode(state == ServerState::Running ?
+            drogon::k200OK : drogon::k409Conflict);
+        callback(response);
+        return ;
+    }
+
+    // Establish monitoring before submitting the start request.
+    if (!monitorStarted.load() && startMonitorOnState() < 0)
+    {
+        Json::Value json;
+        json["success"] = false;
+        json["error"] = "Cannot monitor server state";
+        auto response = drogon::HttpResponse::newHttpJsonResponse(json);
+        response->setStatusCode(drogon::k500InternalServerError);
+        callback(response);
+        return;
+    }
+
+    m_startInProgress = true;
+    ++m_startAttempt;
+    // Discard initial state reads submitted before this start request.
+    ++m_stateRevision;
     startTransient(std::move(callback));
 }
 
 void MinecraftServer::stop(Callback &&callback)
 {
-    drogon::app().getLoop()->queueInLoop([&]
-    {            
-        m_console.detachFromEventLoop();
-    });
-    executeUnitAction(UnitAction::Stop, std::move(callback));
+    drogon::app().getLoop()->queueInLoop(
+        [this, callback = std::move(callback)]() mutable
+        {
+            m_console.detachFromEventLoop();
+            executeUnitAction(UnitAction::Stop, std::move(callback));
+        });
 }
 
 void MinecraftServer::restart(Callback &&callback)
 {
-    executeUnitAction(UnitAction::Restart, std::move(callback));
+    drogon::app().getLoop()->queueInLoop(
+        [this, callback = std::move(callback)]() mutable
+        {
+            executeUnitAction(UnitAction::Restart, std::move(callback));
+        });
+}
+
+void MinecraftServer::checkStartState(std::uint64_t attempt)
+{
+    // Reconcile with systemd if a terminal state signal was missed.
+    std::weak_ptr<int> lifetime = m_lifetime;
+    drogon::app().getLoop()->runAfter(5.0, [this, lifetime, attempt]
+    {
+        if (!lifetime.lock() || !m_startInProgress || attempt != m_startAttempt)
+            return ;
+        auto &bus = m_sdBusProvider.current();
+        bus.callMethodAsync(
+            SYSTEMD_DESTINATION, m_objectPath.c_str(), DBUS_PROPERTIES_INTERFACE,
+            "Get",
+            [this, lifetime, attempt, revision = m_stateRevision](sd_bus_message *message)
+            {
+                if (!lifetime.lock() || !m_startInProgress || attempt != m_startAttempt ||
+                    revision != m_stateRevision)
+                    return;
+                const auto *error = sd_bus_message_get_error(message);
+                if (error)
+                {
+                    if (sd_bus_error_has_name(error, "org.freedesktop.DBus.Error.UnknownObject") ||
+                        sd_bus_error_has_name(error, "org.freedesktop.systemd1.NoSuchUnit"))
+                        updateStateFromString("inactive");
+                    return;
+                }
+                if (sd_bus_message_enter_container(message, SD_BUS_TYPE_VARIANT, "s") <= 0)
+                    return;
+                const char *state = nullptr;
+                if (sd_bus_message_read(message, "s", &state) > 0)
+                    updateStateFromString(state);
+            }, "ss", SYSTEMD_UNIT_INTERFACE, "ActiveState");
+        checkStartState(attempt);
+    });
 }
 
 void MinecraftServer::executeUnitAction(UnitAction action, Callback &&callback)
@@ -242,9 +325,21 @@ int MinecraftServer::startMonitorOnState()
 
     auto &bus = m_sdBusProvider.current();
 
-    int r = updateObjectPath(false);
-    if (r != 0)
-        throw std::logic_error("updateObjectPath() can't update m_objectPath");
+    if (monitorStarted.load())
+        return 0;
+
+    // Transient units may not exist yet. Their object path is deterministic,
+    // so subscribe before creation as well as for already running units.
+    char *encodedPath = nullptr;
+    int r = sd_bus_path_encode("/org/freedesktop/systemd1/unit",
+        (m_name + ".service").c_str(), &encodedPath);
+    if (r < 0)
+        return r;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_objectPath = encodedPath;
+    }
+    free(encodedPath);
 
     auto functionCallback =
     [this] (sd_bus_message *message)
@@ -367,36 +462,25 @@ int MinecraftServer::startMonitorOnState()
         return (r);
     }
 
-    r = bus.callMethod(
-        SYSTEMD_DESTINATION,
-        SYSTEMD_PATH,
-        SYSTEMD_MANAGER_INTERFACE,
-        "Subscribe",
-        [](sd_bus_message *message)
-        {
-            (void)message;
-        },
-        nullptr);
-
-    if (r < 0)
-    {
-        LOG_ERROR << "MinecraftServer::startMonitorOnState Subscribe: "
-            << std::strerror(-r);
-
-        return (r);
-    }
-
-
     r = bus.callMethodAsync(
         SYSTEMD_DESTINATION,
         objPath.c_str(),
         DBUS_PROPERTIES_INTERFACE,
         "Get",
-        [this](sd_bus_message *message)
+        [this, revision = m_stateRevision](sd_bus_message *message)
         {
+            if (revision != m_stateRevision)
+                return;
             if (sd_bus_message_is_method_error(message, nullptr) != 0)
             {
                 const auto *error = sd_bus_message_get_error(message);
+                if (error && error->name &&
+                    (std::strcmp(error->name, "org.freedesktop.DBus.Error.UnknownObject") == 0 ||
+                     std::strcmp(error->name, "org.freedesktop.systemd1.NoSuchUnit") == 0))
+                {
+                    updateStateFromString("inactive");
+                    return;
+                }
                 LOG_ERROR << "Failed to read initial ActiveState for " << m_service
                     << ": " << (error && error->message ? error->message : "Invalid D-Bus reply");
                 return;
@@ -440,12 +524,19 @@ int MinecraftServer::startMonitorOnState()
         return r;
     }
 
+    monitorStarted.store(true);
     return (0);
+}
+
+void MinecraftServer::setStateCallback(std::function<void(const char *)> callback)
+{
+    m_stateCallback = std::move(callback);
 }
 
 void MinecraftServer::updateStateFromString(const char *state)
 {
     ServerState newState = ServerState::Unknown;
+    ServerState oldState = m_state.load(std::memory_order_relaxed);
 
     if (state)
     {
@@ -453,22 +544,27 @@ void MinecraftServer::updateStateFromString(const char *state)
             newState = ServerState::Running;
         else if (std::strcmp(state, "inactive") == 0)
             newState = ServerState::Stopped;
-        else if (std::strcmp(state, "activating") == 0)
+        else if (std::strcmp(state, "activating") == 0)  
             newState = ServerState::Starting;
         else if (std::strcmp(state, "deactivating") == 0)
-        {
-            // devo fare il detach della console 
-            drogon::app().getLoop()->queueInLoop([&]
-            {            
-                m_console.detachFromEventLoop();
-            });
             newState = ServerState::Stopping;
-        }
         else if (std::strcmp(state, "failed") == 0)
             newState = ServerState::Failed;
     }
+    if (newState == ServerState::Running || newState == ServerState::Stopped ||
+        newState == ServerState::Failed)
+        m_startInProgress = false;
 
-    m_state.store(newState, std::memory_order_relaxed);
+    if (oldState == newState)
+        return ;
+
+    LOG_DEBUG << "server " << m_name << " (" << m_id << ") change state to \"" << state << "\"";
+    if (oldState == ServerState::Running)          
+        m_console.detachFromEventLoop();
+
+    ++m_stateRevision;
+    if (m_state.exchange(newState, std::memory_order_relaxed) != newState && m_stateCallback)
+        m_stateCallback(statusToString());
 }
 
 const char *MinecraftServer::statusToString() const
@@ -492,24 +588,8 @@ void MinecraftServer::startTransient(Callback &&callback)
     json["server_name"] = m_name;
     json["action"] = "start";
 
-    if (m_console.m_writeFd >= 0 || m_console.m_readFd >= 0) // da aggiungere anche controlli sullo stato etc
-    {
-        auto state = m_state.load(std::memory_order_relaxed);
-        auto response = drogon::HttpResponse::newHttpJsonResponse(json);
-        if (state == ServerState::Running || state == ServerState::Starting)
-        {
-            json["succes"] = true;
-            json["note"] = "already running";
-            response->setStatusCode(drogon::k200OK);
-        }
-        else
-        {
-            json["succes"] = false;
-            response->setStatusCode(drogon::k500InternalServerError);
-        }
-        callback(response);
-        return ;
-    }
+    drogon::app().getLoop()->assertInLoopThread();
+    m_console.detachFromEventLoop();
 
     int stdinPipe[2] {-1, -1};
     int outputPipe[2] {-1, -1};
@@ -621,9 +701,12 @@ void MinecraftServer::startTransient(Callback &&callback)
         // check(sd_bus_message_read(reply, "o", &jobPath), "read job path");
 
         close(stdinPipe[0]);
-        m_console.m_writeFd = stdinPipe[1];
+        stdinPipe[0] = -1;
         close(outputPipe[1]);
-        m_console.m_readFd = outputPipe[0];
+        outputPipe[1] = -1;
+        m_console.m_writeFd = std::exchange(stdinPipe[1], -1);
+        m_console.m_readFd = std::exchange(outputPipe[0], -1);
+        m_console.attachToEventLoop();
 
         sd_bus_message_unref(msg);
         sd_bus_message_unref(reply);
@@ -632,6 +715,9 @@ void MinecraftServer::startTransient(Callback &&callback)
     catch (const std::exception &e)
     {
         cleanup();
+        m_console.detachFromEventLoop();
+        m_console.closeFd();
+        m_startInProgress = false;
         LOG_ERROR << e.what();
         json["success"] = false;
         auto response = drogon::HttpResponse::newHttpJsonResponse(json);
@@ -640,28 +726,10 @@ void MinecraftServer::startTransient(Callback &&callback)
         return ;
     }
 
-    // m_console.setOutputCallback(
-    //     [] (std::string_view lines)
-    //     {
-    //         std::cout << lines << std::flush;
-    //     }
-    // );
-
-
-    drogon::app().getLoop()->queueInLoop([&]
-    {            
-        m_console.attachToEventLoop();
-    });
-
+    m_sdBusProvider.current().refresh();
+    checkStartState(m_startAttempt);
     json["success"] = true;
     auto response = drogon::HttpResponse::newHttpJsonResponse(json);
     response->setStatusCode(drogon::k200OK);
-    if (monitorStarted.exchange(true) == false)
-    {
-        drogon::app().getLoop()->queueInLoop([&]
-        {            
-            startMonitorOnState();
-        });
-    }
     callback(response);
 }

@@ -41,11 +41,12 @@ class MinecraftServer
 	MinecraftServer &operator=(MinecraftServer &&) = delete;
 
 	void start(Callback &&callback);
-    void startTransient(Callback &&callback);
 	void stop(Callback &&callback);
 	void restart(Callback &&callback);
 
     int startMonitorOnState();
+    // Called on the main event loop, like state monitoring.
+    void setStateCallback(std::function<void(const char *)> callback);
     const char *statusToString() const;
 
   private:
@@ -57,6 +58,9 @@ class MinecraftServer
     };
 
   private:
+    void startOnMainLoop(Callback &&callback);
+    void startTransient(Callback &&callback);
+    void checkStartState(std::uint64_t attempt);
 	int updateObjectPath(bool performInAsync);
     void executeUnitAction(UnitAction action, Callback &&callback);
     void updateStateFromString(const char *state);
@@ -80,4 +84,9 @@ class MinecraftServer
     SdBusProvider &m_sdBusProvider;
     std::mutex m_mutex; // usato per aggiornare m_objectPath
     std::atomic<bool> monitorStarted{false};
+    std::function<void(const char *)> m_stateCallback;
+    std::uint64_t m_stateRevision{0};
+    bool m_startInProgress{false}; // Main loop only.
+    std::uint64_t m_startAttempt{0};
+    std::shared_ptr<int> m_lifetime{std::make_shared<int>(0)};
 };

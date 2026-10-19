@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { authenticated: false, servers: [], pending: new Set(), timer: null, loading: false, generation: 0 };
+const state = { authenticated: false, servers: [], pending: new Set(), socket: null, reconnectTimer: null, reconnectDelay: 1000, loading: false, generation: 0 };
 const statuses = { Running: ["En esecuzione", "running"], Stopped: ["Fermo", "stopped"], Starting: ["In avvio", "starting"], Stopping: ["In arresto", "stopping"], Failed: ["Errore", "failed"], Unknown: ["Da verificare", "unknown"] };
 class ApiError extends Error { constructor(message, status) { super(message); this.status = status; } }
 async function api(path, body) {
@@ -13,6 +13,7 @@ async function api(path, body) {
             ...(body === undefined ? {} : { body: JSON.stringify(body) })
         });
         const data = await response.json().catch(() => null);
+        recordEvent("HTTP", `${body === undefined ? "GET" : "POST"} ${path} → ${response.status}`);
         if (!response.ok) {
             const messages = { 401: "Accesso richiesto o credenziali non valide.", 403: "Operazione non consentita. Controlla il token di invito.", 404: "Server non trovato.", 429: "Troppi tentativi. Attendi prima di riprovare.", 500: "Il server non ha completato la richiesta. Riprova." };
             throw new ApiError(messages[response.status] || data?.error || `Richiesta non riuscita (${response.status}).`, response.status);
@@ -41,13 +42,17 @@ function setSession(authenticated, username) {
     $("loadingPanel").hidden = true;
     $("authPanel").hidden = authenticated;
     $("serverPanel").hidden = !authenticated;
+    $("testPanel").hidden = !authenticated;
     $("logoutButton").hidden = !authenticated;
     $("refreshButton").hidden = !authenticated;
     $("sessionLabel").textContent = authenticated ? (username || "Sessione attiva") : "Accesso richiesto";
-    clearInterval(state.timer);
+    stopServersSocket();
     if (authenticated) {
-        state.timer = setInterval(() => { if (!document.hidden) void loadServers(); }, 5000);
+        connectServersSocket();
     } else {
+        closeConsole();
+        $("consoleOutput").textContent = "Apri una console per visualizzare i log.";
+        $("consoleCommand").value = "";
         state.generation++;
         state.servers = [];
         state.pending.clear();
@@ -55,6 +60,59 @@ function setSession(authenticated, username) {
         $("navCount").textContent = "—";
         if ($("confirmDialog").open) $("confirmDialog").close("cancel");
     }
+}
+function stopServersSocket() {
+    clearTimeout(state.reconnectTimer);
+    const socket = state.socket;
+    state.socket = null;
+    if (socket) socket.close();
+    setServersConnection("Disconnesso");
+}
+function connectServersSocket() {
+    if (!state.authenticated || state.socket) return;
+    const socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/servers`);
+    state.socket = socket;
+    setServersConnection("Connessione…");
+    socket.addEventListener("open", () => {
+        if (state.socket !== socket) return;
+        setServersConnection("Connesso");
+        recordEvent("STATO", "WebSocket /ws/servers connesso");
+    });
+    socket.addEventListener("error", () => {
+        if (state.socket === socket) recordEvent("ERRORE", "WebSocket stato: errore di connessione");
+    });
+    socket.addEventListener("message", (event) => {
+        if (state.socket !== socket || !state.authenticated) return;
+        try {
+            const message = JSON.parse(event.data);
+            if (message.type === "servers.snapshot") {
+                if (!Array.isArray(message.servers) || message.servers.some((s) => !s || typeof s.name !== "string" || !Number.isSafeInteger(s.id))) return;
+                state.servers = message.servers;
+                state.reconnectDelay = 1000;
+            } else if (message.type === "server.status") {
+                const server = state.servers.find((s) => s.id === message.serverId);
+                if (!server || typeof message.status !== "string") return;
+                server.status = message.status;
+            } else return;
+            recordEvent("STATO", event.data);
+            renderServers();
+            $("updatedAt").textContent = `Ultimo aggiornamento alle ${new Date().toLocaleTimeString("it-IT")}`;
+        } catch { /* Ignore malformed events. */ }
+    });
+    socket.addEventListener("close", () => {
+        if (state.socket !== socket) return;
+        state.socket = null;
+        setServersConnection("Riconnessione…");
+        recordEvent("STATO", "WebSocket disconnesso; riconnessione automatica");
+        if (!state.authenticated) return;
+        $("updatedAt").textContent = "Aggiornamenti sospesi · riconnessione in corso…";
+        state.reconnectTimer = setTimeout(async () => {
+            // HTTP exposes session expiry, which the browser hides on a failed WS handshake.
+            await loadServers();
+            connectServersSocket();
+        }, state.reconnectDelay);
+        state.reconnectDelay = Math.min(state.reconnectDelay * 2, 30000);
+    });
 }
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -88,13 +146,13 @@ function renderServers() {
         title.append(element("h3", "", server.name), badge);
         content.append(title, element("p", "server-subtitle", `Minecraft · Server #${server.id}`));
         const actions = element("div", "server-actions");
-        for (const [action, text] of [["start", "Avvia"], ["stop", "Arresta"], ["restart", "Riavvia"]]) {
+        for (const [action, text] of [["start", "Avvia"], ["stop", "Arresta"], ["restart", "Riavvia"], ["console", "Console"]]) {
             const button = element("button", `button ${action === "start" ? "primary" : "secondary"}`, text);
             button.type = "button";
             button.dataset.id = String(server.id);
             button.dataset.action = action;
             button.setAttribute("aria-label", `${text} ${server.name}`);
-            button.disabled = state.pending.has(server.id) || ["Starting", "Stopping"].includes(server.status) || (action === "start" && server.status === "Running") || (action !== "start" && server.status === "Stopped");
+            button.disabled = action !== "console" && (state.pending.has(server.id) || ["Starting", "Stopping"].includes(server.status) || (action === "start" && server.status === "Running") || (action !== "start" && server.status === "Stopped"));
             actions.append(button);
         }
         content.append(actions, element("p", "action-note", state.pending.has(server.id) ? "Invio del comando in corso…" : ""));
@@ -106,6 +164,7 @@ function renderServers() {
         const button = Array.from(grid.querySelectorAll("button")).find((node) => node.dataset.id === focusKey[0] && node.dataset.action === focusKey[1]);
         if (button && !button.disabled) button.focus({ preventScroll: true });
     }
+    syncConsoleServers();
     $("emptyState").hidden = servers.length !== 0;
     $("emptyState").querySelector("h3").textContent = query ? "Nessun risultato" : "Nessun server configurato";
     $("emptyState").querySelector("p").textContent = query ? "Prova un altro nome o cerca per ID." : "I server compariranno qui appena saranno disponibili.";
@@ -120,7 +179,8 @@ async function loadServers(initial = false) {
         const data = await api("/api/servers");
         if (generation !== state.generation) return;
         if (!Array.isArray(data.servers) || data.servers.some((s) => !s || typeof s.name !== "string" || !Number.isSafeInteger(s.id))) throw new Error("La lista dei server non è valida.");
-        state.servers = data.servers;
+        // An open socket owns live state; avoid overwriting it with an older HTTP reply.
+        if (state.socket?.readyState !== WebSocket.OPEN) state.servers = data.servers;
         if (!state.authenticated) setSession(true);
         renderServers();
         $("updatedAt").textContent = `Ultimo aggiornamento alle ${new Date().toLocaleTimeString("it-IT")}`;
@@ -144,7 +204,7 @@ $("loginTab").addEventListener("click", () => switchAuth(false));
 $("registerTab").addEventListener("click", () => switchAuth(true));
 $("serverSearch").addEventListener("input", renderServers);
 $("refreshButton").addEventListener("click", () => void loadServers());
-document.addEventListener("visibilitychange", () => { if (!document.hidden && state.authenticated) void loadServers(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && state.authenticated) connectServersSocket(); });
 for (const register of [false, true]) {
     const form = $(register ? "registerForm" : "loginForm");
     form.addEventListener("submit", async (event) => {
@@ -207,6 +267,7 @@ $("serverGrid").addEventListener("click", async (event) => {
     if (!button || button.disabled || !state.authenticated) return;
     const server = state.servers.find((s) => String(s.id) === button.dataset.id);
     const action = button.dataset.action;
+    if (server && action === "console") { openConsole(server.id); return; }
     if (!server || !["start", "stop", "restart"].includes(action) || state.pending.has(server.id)) return;
     if (action !== "start" && !await confirmAction(server, action)) return;
     if (!state.authenticated || state.pending.has(server.id)) return;
@@ -219,7 +280,6 @@ $("serverGrid").addEventListener("click", async (event) => {
         if (result.success !== true) throw new Error("Il comando non è stato accettato dal server.");
         const label = { start: "Avvio", stop: "Arresto", restart: "Riavvio" }[action];
         notice(`${label} richiesto per ${server.name}. Lo stato si aggiornerà automaticamente.`);
-        await loadServers();
     } catch (error) {
         if (generation !== state.generation) return;
         if (error.status === 401) setSession(false);
@@ -230,5 +290,10 @@ $("serverGrid").addEventListener("click", async (event) => {
             if (state.authenticated) renderServers();
         }
     }
+});
+$("reconnectServers").addEventListener("click", () => {
+    stopServersSocket();
+    state.reconnectDelay = 1000;
+    connectServersSocket();
 });
 void loadServers(true);

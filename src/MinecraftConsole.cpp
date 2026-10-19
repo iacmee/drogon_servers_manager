@@ -23,7 +23,7 @@ void MinecraftConsole::closeFd()
 
     if (m_writeFd >= 0 && close(m_writeFd) < 0)
         LOG_ERROR << "MinecraftConsole::closeFd (m_writeFd)" << std::strerror(errno);
-    if (m_writeFd >= 0 && close(m_readFd) < 0)
+    if (m_readFd >= 0 && close(m_readFd) < 0)
         LOG_ERROR << "MinecraftConsole::closeFd (m_readFd)" << std::strerror(errno);
         
     m_writeFd = -1;
@@ -107,10 +107,12 @@ void MinecraftConsole::handleConsoleData()
 
     const auto length = nlPos + 1;
 
-    // m_last100Lines.append(m_outputBuffer.data(), length);
+
+    auto data = std::string_view(m_outputBuffer.data(), length);
+    appendLast100Lines(data);
 
     if (m_outputCallback)
-        m_outputCallback(std::string_view(m_outputBuffer.data(), length));
+        m_outputCallback(data);
 
     m_outputBuffer.erase(0, length);
 }
@@ -235,14 +237,16 @@ void MinecraftConsole::detachFromEventLoop()
 {
     auto *loop = drogon::app().getLoop();
 
-    if (!loop->isInLoopThread())
-        throw std::logic_error("detachFromEventLoop must run on main event loop thread");
+    loop->runInLoop([&]
+    {
+        detachReadChannel();
+        detachWriteChannel();
 
-    detachReadChannel();
-    detachWriteChannel();
+        m_inputBuffer.clear();
+        m_outputBuffer.clear();
 
-    m_inputBuffer.clear();
-    m_outputBuffer.clear();
+        LOG_DEBUG << "Detached from EventLoop";
+    });
 }
 
 void MinecraftConsole::setOutputCallback(std::function<void(std::string_view)> callback)

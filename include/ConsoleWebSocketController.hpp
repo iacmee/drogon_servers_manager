@@ -2,12 +2,12 @@
 #include <drogon/WebSocketController.h>
 #include "MinecraftServer.hpp"
 
-class WebSocketTest : public drogon::WebSocketController<WebSocketTest, false>
+class ConsoleWebSocketController : public drogon::WebSocketController<ConsoleWebSocketController, false>
 {
   public:
 
-    explicit WebSocketTest(std::shared_ptr<std::vector<MinecraftServer>> servers);
-    ~WebSocketTest() override;
+    explicit ConsoleWebSocketController(std::shared_ptr<std::vector<MinecraftServer>> servers);
+    ~ConsoleWebSocketController() override;
 
 	void handleNewConnection(const drogon::HttpRequestPtr &req,
 		const drogon::WebSocketConnectionPtr &conn) override;

@@ -1,7 +1,8 @@
-#include "WebSocketTest.hpp"
+#include "ConsoleWebSocketController.hpp"
 #include <algorithm>
+#include <charconv>
 
-WebSocketTest::WebSocketTest(std::shared_ptr<std::vector<MinecraftServer>> servers) : m_servers(std::move(servers))
+ConsoleWebSocketController::ConsoleWebSocketController(std::shared_ptr<std::vector<MinecraftServer>> servers) : m_servers(std::move(servers))
 {
     for (auto &server : *m_servers)
     {
@@ -16,7 +17,7 @@ WebSocketTest::WebSocketTest(std::shared_ptr<std::vector<MinecraftServer>> serve
     }
 }
 
-WebSocketTest::~WebSocketTest()
+ConsoleWebSocketController::~ConsoleWebSocketController()
 {
     for (auto &server : *m_servers)
     {
@@ -24,7 +25,7 @@ WebSocketTest::~WebSocketTest()
     }
 }
 
-void WebSocketTest::broadcast(std::int64_t id, std::string_view lines)
+void ConsoleWebSocketController::broadcast(std::int64_t id, std::string_view lines)
 {
     std::vector<drogon::WebSocketConnectionPtr> clients;
 
@@ -47,7 +48,7 @@ void WebSocketTest::broadcast(std::int64_t id, std::string_view lines)
     }
 }
 
-MinecraftServer *WebSocketTest::findServer(std::int64_t id)
+MinecraftServer *ConsoleWebSocketController::findServer(std::int64_t id)
 {
     for (auto& server : *m_servers)
     {
@@ -58,14 +59,22 @@ MinecraftServer *WebSocketTest::findServer(std::int64_t id)
 }
 
 
-void WebSocketTest::handleNewConnection(
+void ConsoleWebSocketController::handleNewConnection(
     const drogon::HttpRequestPtr &req,
     const drogon::WebSocketConnectionPtr &conn)
 {
     const std::string path = req->path();
 
     const auto pos = path.find_last_of('/');
-    const std::int64_t serverId = std::stoll(path.substr(pos + 1));
+    std::int64_t serverId;
+    const auto idText = std::string_view(path).substr(pos + 1);
+    const auto [end, error] = std::from_chars(idText.data(),
+        idText.data() + idText.size(), serverId);
+    if (error != std::errc{} || end != idText.data() + idText.size())
+    {
+        conn->forceClose();
+        return;
+    }
 
     auto server = findServer(serverId);
     if (!server)
@@ -82,10 +91,15 @@ void WebSocketTest::handleNewConnection(
 
     LOG_INFO << "WebSocket connected to server " << serverId;
     conn->send("Connected to Minecraft server " + std::to_string(serverId) + "\n");
-    conn->send(server->m_console.getLast100Lines());
+    auto servers = m_servers;
+    drogon::app().getLoop()->queueInLoop([servers, server, conn]
+    {
+        if (conn->connected())
+            conn->send(server->m_console.getLast100Lines());
+    });
 }
 
-void WebSocketTest::handleNewMessage(
+void ConsoleWebSocketController::handleNewMessage(
     const drogon::WebSocketConnectionPtr &conn,
     std::string &&message,
     const drogon::WebSocketMessageType &type)
@@ -112,7 +126,7 @@ void WebSocketTest::handleNewMessage(
         conn->send("Minecraft server not found");
 }
 
-void WebSocketTest::handleConnectionClosed(
+void ConsoleWebSocketController::handleConnectionClosed(
     const drogon::WebSocketConnectionPtr &conn)
 {
     std::lock_guard<std::mutex> lock(m_mutex);

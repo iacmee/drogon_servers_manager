@@ -12,7 +12,7 @@ void SdBusProvider::initialize()
 SdBusConnection &SdBusProvider::current()
 {
 	if (!m_connection)
-		throw std::logic_error("SdBusProvider not initialized");
+		throw std::logic_error("SdBusProvider not initialized!");
 
 	auto &bus = m_connection->getThreadData();
 

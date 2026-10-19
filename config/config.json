@@ -58,10 +58,18 @@
         {
             "id" : 1,
             "name": "test_server",
-            "jarPath": "/home/iacme/Desktop/https/import/test_server/paper-26.2-128.jar",
+            "jarPath": "/home/iacme/Desktop/https/import/test_server/paper-26.3-191.jar",
             "directory": "/home/iacme/Desktop/https/import/test_server",
             "service": "minecraft_server_blueprint.service",
-            "logPath": "/home/iacme/Desktop/https/import/logs/latest.log"
+            "logPath": "/home/iacme/Desktop/https/import/test_server/logs/latest.log"
+        },
+        {
+            "id" : 2,
+            "name": "test_server_2",
+            "jarPath": "/home/iacme/Desktop/https/import/test_server_2/paper-26.3-191.jar",
+            "directory": "/home/iacme/Desktop/https/import/test_server_2",
+            "service": "minecraft_server_blueprint.service",
+            "logPath": "/home/iacme/Desktop/https/import/test_server_2/logs/latest.log"
         }
     ]
 }
