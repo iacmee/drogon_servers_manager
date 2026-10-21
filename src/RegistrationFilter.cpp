@@ -3,28 +3,28 @@
 
 bool RegistrationLimiter::allow(const std::string &ip, Clock::time_point now)
 {
-    std::lock_guard lock(mutex);
+    std::lock_guard lock(m_mutex);
     const auto expired = [now](const Window &window)
     {
-        return window.count == 0 || now - window.start >= std::chrono::minutes(1);
+        return window.m_count == 0 || now - window.m_start >= std::chrono::minutes(1);
     };
-    if (expired(global))
+    if (expired(m_global))
     {
-        global = {now, 0};
-        std::erase_if(addresses, [&](const auto &item) { return expired(item.second); });
+        m_global = {now, 0};
+        std::erase_if(m_addresses, [&](const auto &item) { return expired(item.second); });
     }
-    if (global.count >= 30) return false;
-    auto it = addresses.find(ip);
-    if (it == addresses.end())
+    if (m_global.m_count >= 30) return false;
+    auto it = m_addresses.find(ip);
+    if (it == m_addresses.end())
     {
         // Explicit bound even when clients rotate addresses between windows.
-        if (addresses.size() >= 4096) return false;
-        it = addresses.emplace(ip, Window{now, 0}).first;
+        if (m_addresses.size() >= 4096) return false;
+        it = m_addresses.emplace(ip, Window{now, 0}).first;
     }
     if (expired(it->second)) it->second = {now, 0};
-    if (it->second.count >= 5) return false;
-    ++it->second.count;
-    ++global.count;
+    if (it->second.m_count >= 5) return false;
+    ++it->second.m_count;
+    ++m_global.m_count;
     return true;
 }
 
@@ -33,7 +33,7 @@ void RegistrationFilter::doFilter(const drogon::HttpRequestPtr &req,
 {
     // Never trust caller-supplied forwarding headers. Proxy trust is configured
     // separately at deployment; until then proxy clients share its IP budget.
-    if (!limiter.allow(req->peerAddr().toIp()))
+    if (!m_limiter.allow(req->peerAddr().toIp()))
     {
         Json::Value json;
         json["error"] = "Too many registration attempts";

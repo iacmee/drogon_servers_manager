@@ -19,12 +19,12 @@ class ConsoleOutput : public std::enable_shared_from_this<ConsoleOutput>
     void checkTimeout();
 
   private:
-    std::weak_ptr<drogon::WebSocketConnection> connection;
-    std::mutex mutex;
-    std::deque<std::string> queue;
-    std::size_t bytes{0}; // includes the frame awaiting acknowledgement
-    std::string pendingToken;
-    bool closed{false};
-    bool timerActive{false};
-    std::chrono::steady_clock::time_point deadline;
+    std::weak_ptr<drogon::WebSocketConnection> m_connection;
+    std::mutex m_mutex;
+    std::deque<std::string> m_queue;
+    std::size_t m_bytes{0}; // includes the frame awaiting acknowledgement
+    std::string m_pendingToken;
+    bool m_closed{false};
+    bool m_timerActive{false};
+    std::chrono::steady_clock::time_point m_deadline;
 };

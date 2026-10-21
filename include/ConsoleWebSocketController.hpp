@@ -32,9 +32,9 @@ class ConsoleWebSocketController : public drogon::WebSocketController<ConsoleWeb
     std::mutex m_mutex;
     struct Client
     {
-        std::int64_t serverId;
-        std::shared_ptr<ConsoleOutput> output;
-        bool acceptingCommands{true};
+        std::int64_t m_serverId;
+        std::shared_ptr<ConsoleOutput> m_output;
+        bool m_acceptingCommands{true};
     };
     std::unordered_map<drogon::WebSocketConnectionPtr, Client> m_connections;
     std::shared_ptr<std::vector<MinecraftServer>> m_servers;

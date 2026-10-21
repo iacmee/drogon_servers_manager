@@ -32,8 +32,8 @@ void validatePaths(const paperpilot::Config &config)
 
 void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Config &config)
 {
-    SessionAccess::lifetime = std::chrono::seconds(config.session.timeout);
-    WebSocketOriginFilter::allowedOrigins = config.allowedOrigins;
+    SessionAccess::m_lifetime = std::chrono::seconds(config.session.timeout);
+    WebSocketOriginFilter::m_allowedOrigins = config.allowedOrigins;
     app.setClientMaxBodySize(auth_limits::bodyBytes);
     app.setClientMaxWebSocketMessageSize(console_limits::commandBytes);
     app.setThreadNum(config.threads);

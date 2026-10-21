@@ -18,21 +18,21 @@ class SessionAccess
 	static bool allowed(const drogon::WebSocketConnectionPtr &connection);
 	static bool bind(const drogon::HttpRequestPtr &request, const drogon::WebSocketConnectionPtr &connection);
   public:
-	static std::chrono::seconds lifetime;
+	static std::chrono::seconds m_lifetime;
 
   private:
-    const std::chrono::steady_clock::time_point expires;
-	std::mutex mutex;
-	bool revoked{false};
-    double commandTokens{console_limits::commandBurst};
-    std::chrono::steady_clock::time_point lastCommand{std::chrono::steady_clock::now()};
-	std::vector<std::weak_ptr<drogon::WebSocketConnection>> connections;
+    const std::chrono::steady_clock::time_point m_expires;
+	std::mutex m_mutex;
+	bool m_revoked{false};
+    double m_commandTokens{console_limits::commandBurst};
+    std::chrono::steady_clock::time_point m_lastCommand{std::chrono::steady_clock::now()};
+	std::vector<std::weak_ptr<drogon::WebSocketConnection>> m_connections;
 };
 
 class WebSocketOriginFilter : public drogon::HttpFilter<WebSocketOriginFilter>
 {
   public:
-	static std::vector<std::string> allowedOrigins;
+	static std::vector<std::string> m_allowedOrigins;
 	static bool accepts(const std::string &origin);
 	void doFilter(const drogon::HttpRequestPtr &req, drogon::FilterCallback
 		&&reject, drogon::FilterChainCallback &&next) override;

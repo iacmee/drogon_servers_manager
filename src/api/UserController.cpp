@@ -400,12 +400,12 @@ namespace
 class CommitAwaiter : public drogon::CallbackAwaiter<bool>
 {
   public:
-    explicit CommitAwaiter(std::shared_ptr<drogon::orm::Transaction> transaction) : transaction(std::move(transaction)) {}
+    explicit CommitAwaiter(std::shared_ptr<drogon::orm::Transaction> transaction) : m_transaction(std::move(transaction)) {}
     void await_suspend(std::coroutine_handle<> handle)
     {
         auto *loop = trantor::EventLoop::getEventLoopOfCurrentThread();
         if (!loop) throw std::logic_error("Commit requires an event loop");
-        transaction->setCommitCallback([this, loop, handle](bool committed)
+        m_transaction->setCommitCallback([this, loop, handle](bool committed)
         {
             loop->queueInLoop([this, handle, committed]
             {
@@ -413,10 +413,10 @@ class CommitAwaiter : public drogon::CallbackAwaiter<bool>
                 handle.resume();
             });
         });
-        transaction.reset(); // Drogon commits when its last reference is released.
+        m_transaction.reset(); // Drogon commits when its last reference is released.
     }
   private:
-    std::shared_ptr<drogon::orm::Transaction> transaction;
+    std::shared_ptr<drogon::orm::Transaction> m_transaction;
 };
 
 drogon::HttpResponsePtr passwordBusy()
@@ -585,7 +585,7 @@ drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callba
             co_return (callback(jsonError(drogon::k401Unauthorized, "Invalid username or password")));
 
         auto session = req->session();
-        auto access = std::make_shared<SessionAccess>(SessionAccess::lifetime);
+        auto access = std::make_shared<SessionAccess>(SessionAccess::m_lifetime);
         session->modify([&](drogon::Session::SessionMap &values)
         {
             const auto previous = values.find("access");
@@ -597,7 +597,7 @@ drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callba
             values["username"] = user->getValueOfUsername();
         });
         session->changeSessionIdToClient();
-        drogon::app().getLoop()->runAfter(SessionAccess::lifetime.count(),
+        drogon::app().getLoop()->runAfter(SessionAccess::m_lifetime.count(),
             [weak = std::weak_ptr<SessionAccess>(access)]
             {
                 if (auto grant = weak.lock())

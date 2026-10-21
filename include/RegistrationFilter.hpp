@@ -13,12 +13,12 @@ class RegistrationLimiter
   private:
 	struct	Window
 	{
-		Clock::time_point start;
-		unsigned count{0};
+		Clock::time_point m_start;
+		unsigned m_count{0};
 	};
-	std::mutex mutex;
-	Window global{Clock::time_point::min(), 0};
-	std::unordered_map<std::string, Window> addresses;
+	std::mutex m_mutex;
+	Window m_global{Clock::time_point::min(), 0};
+	std::unordered_map<std::string, Window> m_addresses;
 };
 
 class RegistrationFilter : public drogon::HttpFilter<RegistrationFilter>
@@ -28,5 +28,5 @@ class RegistrationFilter : public drogon::HttpFilter<RegistrationFilter>
 		&&reject, drogon::FilterChainCallback &&next) override;
 
   private:
-	RegistrationLimiter limiter;
+	RegistrationLimiter m_limiter;
 };

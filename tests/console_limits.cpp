@@ -10,20 +10,20 @@
 class TestConnection : public drogon::WebSocketConnection
 {
   public:
-    std::vector<std::pair<std::string, drogon::WebSocketMessageType>> sent;
-    bool open{true};
-    trantor::InetAddress address;
+    std::vector<std::pair<std::string, drogon::WebSocketMessageType>> m_sent;
+    bool m_open{true};
+    trantor::InetAddress m_address;
     void send(const char *data, uint64_t size, drogon::WebSocketMessageType type) override
     { send(std::string_view(data, size), type); }
     void send(std::string_view data, drogon::WebSocketMessageType type) override
-    { sent.emplace_back(data, type); }
+    { m_sent.emplace_back(data, type); }
     void sendJson(const Json::Value &, drogon::WebSocketMessageType) override { assert(false); }
-    const trantor::InetAddress &localAddr() const override { return address; }
-    const trantor::InetAddress &peerAddr() const override { return address; }
-    bool connected() const override { return open; }
-    bool disconnected() const override { return !open; }
-    void shutdown(drogon::CloseCode, const std::string &) override { open = false; }
-    void forceClose() override { open = false; }
+    const trantor::InetAddress &localAddr() const override { return m_address; }
+    const trantor::InetAddress &peerAddr() const override { return m_address; }
+    bool connected() const override { return m_open; }
+    bool disconnected() const override { return !m_open; }
+    void shutdown(drogon::CloseCode, const std::string &) override { m_open = false; }
+    void forceClose() override { m_open = false; }
     void setPingMessage(const std::string &, const std::chrono::duration<double> &) override {}
     void disablePing() override {}
 };
@@ -50,20 +50,20 @@ int main()
     connection->setContext(std::make_shared<SessionAccess>(std::chrono::seconds(60)));
     auto output = std::make_shared<ConsoleOutput>(connection);
     output->enqueue("first\n");
-    assert(connection->sent.size() == 2);
-    assert(connection->sent[1].second == drogon::WebSocketMessageType::Ping);
-    const auto token = connection->sent[1].first;
+    assert(connection->m_sent.size() == 2);
+    assert(connection->m_sent[1].second == drogon::WebSocketMessageType::Ping);
+    const auto token = connection->m_sent[1].first;
     output->enqueue("second\n");
     output->acknowledge("forged");
-    assert(connection->sent.size() == 2);
+    assert(connection->m_sent.size() == 2);
     output->acknowledge(token);
-    assert(connection->sent.size() == 4);
-    assert(connection->sent[2].first == "second\n");
+    assert(connection->m_sent.size() == 4);
+    assert(connection->m_sent[2].first == "second\n");
     output->acknowledge(token); // replay must not release the next frame
-    assert(connection->sent.size() == 4);
+    assert(connection->m_sent.size() == 4);
     output->enqueue(std::string(clientQueueBytes, 'x'));
-    assert(!connection->open);
-    assert(connection->sent.size() == 4); // backlog never reached TCP
+    assert(!connection->m_open);
+    assert(connection->m_sent.size() == 4); // backlog never reached TCP
 
     auto slow = std::make_shared<TestConnection>();
     slow->setContext(std::make_shared<SessionAccess>(std::chrono::seconds(60)));
@@ -159,7 +159,7 @@ int main()
     loop->runAfter(acknowledgementSeconds + .1, [&]
     {
         assert(pipeDone);
-        assert(!slow->open); // a silent peer is disconnected even without new logs
+        assert(!slow->m_open); // a silent peer is disconnected even without new logs
         loop->quit();
     });
     loop->runAfter(15, [] { std::abort(); }); // fail rather than hang

@@ -4,29 +4,29 @@
 #include <sodium.h>
 
 ConsoleOutput::ConsoleOutput(const drogon::WebSocketConnectionPtr &connection) :
-    connection(connection) {}
+    m_connection(connection) {}
 
 void ConsoleOutput::close()
 {
-    closed = true;
-    queue.clear();
-    bytes = 0;
-    pendingToken.clear();
-    if (auto conn = connection.lock())
+    m_closed = true;
+    m_queue.clear();
+    m_bytes = 0;
+    m_pendingToken.clear();
+    if (auto conn = m_connection.lock())
         conn->forceClose();
 }
 
 void ConsoleOutput::enqueue(std::string_view text)
 {
-    std::lock_guard lock(mutex);
-    if (closed || text.empty())
+    std::lock_guard lock(m_mutex);
+    if (m_closed || text.empty())
         return ;
-    if (text.size() > console_limits::clientQueueBytes - bytes)
+    if (text.size() > console_limits::clientQueueBytes - m_bytes)
     {
         close();
         return ;
     }
-    bytes += text.size();
+    m_bytes += text.size();
     while (!text.empty())
     {
         auto length = std::min(text.size(), console_limits::outputChunk);
@@ -39,7 +39,7 @@ void ConsoleOutput::enqueue(std::string_view text)
             close();
             return;
         }
-        queue.emplace_back(text.substr(0, length));
+        m_queue.emplace_back(text.substr(0, length));
         text.remove_prefix(length);
     }
     pump();
@@ -47,10 +47,10 @@ void ConsoleOutput::enqueue(std::string_view text)
 
 void ConsoleOutput::pump()
 {
-    if (closed || !pendingToken.empty() || queue.empty())
+    if (m_closed || !m_pendingToken.empty() || m_queue.empty())
         return ;
 
-    auto conn = connection.lock();
+    auto conn = m_connection.lock();
     if (!conn || !SessionAccess::allowed(conn))
     {
         close();
@@ -60,13 +60,13 @@ void ConsoleOutput::pump()
     char encoded[33];
     randombytes_buf(random, sizeof(random));
     sodium_bin2hex(encoded, sizeof(encoded), random, sizeof(random));
-    pendingToken = encoded;
-    conn->send(queue.front());
-    conn->send(pendingToken, drogon::WebSocketMessageType::Ping);
-    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(static_cast<int>(console_limits::acknowledgementSeconds));
-    if (!timerActive)
+    m_pendingToken = encoded;
+    conn->send(m_queue.front());
+    conn->send(m_pendingToken, drogon::WebSocketMessageType::Ping);
+    m_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(static_cast<int>(console_limits::acknowledgementSeconds));
+    if (!m_timerActive)
     {
-        timerActive = true;
+        m_timerActive = true;
         drogon::app().getLoop()->runAfter(console_limits::acknowledgementSeconds,
             [weak = weak_from_this()]
             {
@@ -78,24 +78,24 @@ void ConsoleOutput::pump()
 
 void ConsoleOutput::acknowledge(std::string_view token)
 {
-    std::lock_guard lock(mutex);
-    if (closed || pendingToken.empty() || token != pendingToken)
+    std::lock_guard lock(m_mutex);
+    if (m_closed || m_pendingToken.empty() || token != m_pendingToken)
         return ;
-    bytes -= queue.front().size();
-    queue.pop_front();
-    pendingToken.clear();
+    m_bytes -= m_queue.front().size();
+    m_queue.pop_front();
+    m_pendingToken.clear();
     pump();
 }
 
 void ConsoleOutput::checkTimeout()
 {
-    std::lock_guard lock(mutex);
-    if (closed || pendingToken.empty())
+    std::lock_guard lock(m_mutex);
+    if (m_closed || m_pendingToken.empty())
     {
-        timerActive = false;
+        m_timerActive = false;
         return ;
     }
-    const auto remaining = std::chrono::duration<double>(deadline - std::chrono::steady_clock::now()).count();
+    const auto remaining = std::chrono::duration<double>(m_deadline - std::chrono::steady_clock::now()).count();
     if (remaining <= 0)
     {
         close();

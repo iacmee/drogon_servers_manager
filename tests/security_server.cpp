@@ -11,8 +11,8 @@ int main(int argc, char **argv)
 {
     if (argc != 3)
         return 2;
-    SessionAccess::lifetime = std::chrono::seconds(3);
-    WebSocketOriginFilter::allowedOrigins = {"https://panel.example"};
+    SessionAccess::m_lifetime = std::chrono::seconds(3);
+    WebSocketOriginFilter::m_allowedOrigins = {"https://panel.example"};
     SdBusProvider provider;
     auto servers = std::make_shared<std::vector<MinecraftServer>>();
     servers->emplace_back(1, "test", "/tmp", "unused.service", "/tmp/unused.log",

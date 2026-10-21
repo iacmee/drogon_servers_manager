@@ -36,8 +36,8 @@ void ConsoleWebSocketController::broadcast(std::int64_t id, std::string_view lin
 
         for (const auto &[conn, client] : m_connections)
         {
-            if (client.serverId == id)
-                clients.push_back(client.output);
+            if (client.m_serverId == id)
+                clients.push_back(client.m_output);
         }
     }
 
@@ -114,13 +114,13 @@ void ConsoleWebSocketController::handleNewMessage(
     {
         std::lock_guard lock(m_mutex);
         const auto it = m_connections.find(conn);
-        if (it == m_connections.end() || !it->second.acceptingCommands)
+        if (it == m_connections.end() || !it->second.m_acceptingCommands)
             return ;
         client = it->second;
     }
     if (type == drogon::WebSocketMessageType::Pong)
     {
-        client.output->acknowledge(message);
+        client.m_output->acknowledge(message);
         return ;
     }
     if (type == drogon::WebSocketMessageType::Ping || type == drogon::WebSocketMessageType::Close)
@@ -130,7 +130,7 @@ void ConsoleWebSocketController::handleNewMessage(
         {
             std::lock_guard lock(m_mutex);
             if (auto it = m_connections.find(conn); it != m_connections.end())
-                it->second.acceptingCommands = false;
+                it->second.m_acceptingCommands = false;
         }
         conn->shutdown(drogon::CloseCode::kViolation, reason);
         drogon::app().getLoop()->runAfter(1, [weak = std::weak_ptr<drogon::WebSocketConnection>(conn)]
@@ -151,7 +151,7 @@ void ConsoleWebSocketController::handleNewMessage(
         reject("Expected one command, maximum 4096 bytes");
         return;
     }
-    auto *server = findServer(client.serverId);
+    auto *server = findServer(client.m_serverId);
     if (!server)
         return ;
     server->m_console.sendCommand(std::move(message),
@@ -160,7 +160,7 @@ void ConsoleWebSocketController::handleNewMessage(
             auto connection = weak.lock();
             return (connection && SessionAccess::allowed(connection));
         },
-        [weak = std::weak_ptr<ConsoleOutput>(client.output)](std::string_view error)
+        [weak = std::weak_ptr<ConsoleOutput>(client.m_output)](std::string_view error)
         {
             if (auto output = weak.lock())
                 output->enqueue("[console error: " + std::string(error) + "]\n");
