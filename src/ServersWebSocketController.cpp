@@ -1,3 +1,4 @@
+#include "SessionAccess.hpp"
 #include "ServersWebSocketController.hpp"
 
 namespace
@@ -16,13 +17,16 @@ ServersWebSocketController::ServersWebSocketController(
 {
 }
 
-void ServersWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &,
+void ServersWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &req,
     const drogon::WebSocketConnectionPtr &conn)
 {
+    if (!SessionAccess::bind(req, conn))
+        return ;
+
     auto self = shared_from_this();
     drogon::app().getLoop()->queueInLoop([self, conn]
     {
-        if (!conn->connected())
+        if (!SessionAccess::allowed(conn))
             return ;
         Json::Value message;
         message["type"] = "servers.snapshot";
@@ -63,6 +67,6 @@ void ServersWebSocketController::broadcastStatus(std::int64_t id, const char *st
     message["status"] = status;
     const auto payload = serialize(message);
     for (const auto &conn : m_connections)
-        if (conn->connected())
+        if (SessionAccess::allowed(conn))
             conn->send(payload);
 }

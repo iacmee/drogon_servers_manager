@@ -17,7 +17,7 @@ class ServersWebSocketController : public drogon::WebSocketController<ServersWeb
     void broadcastStatus(std::int64_t id, const char *status);
 
     WS_PATH_LIST_BEGIN
-    WS_PATH_ADD("/ws/servers", "AuthFilter");
+    WS_PATH_ADD("/ws/servers", "AuthFilter", "WebSocketOriginFilter");
     WS_PATH_LIST_END
 
   private:

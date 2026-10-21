@@ -1,3 +1,4 @@
+#include "SessionAccess.hpp"
 #include "config.h"
 #include "UserController.hpp"
 #include "ServerController.hpp"
@@ -29,6 +30,8 @@ void validatePaths(const paperpilot::Config &config)
 
 void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Config &config)
 {
+    SessionAccess::lifetime = std::chrono::seconds(config.session.timeout);
+    WebSocketOriginFilter::allowedOrigins = config.allowedOrigins;
     app.setThreadNum(config.threads);
     app.setDocumentRoot(config.documentRoot);
     app.addDbClient(drogon::orm::Sqlite3Config{1, config.databaseFile, "default", -1});

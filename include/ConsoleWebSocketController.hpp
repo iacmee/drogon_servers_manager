@@ -23,7 +23,7 @@ class ConsoleWebSocketController : public drogon::WebSocketController<ConsoleWeb
     MinecraftServer *findServer(std::int64_t id);
 
     WS_PATH_LIST_BEGIN
-    WS_ADD_PATH_VIA_REGEX(R"(^/ws/console/[0-9]+$)", "AuthFilter");
+    WS_ADD_PATH_VIA_REGEX(R"(^/ws/console/[0-9]+$)", "AuthFilter", "WebSocketOriginFilter");
     WS_PATH_LIST_END
 
 

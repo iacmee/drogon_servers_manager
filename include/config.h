@@ -35,6 +35,7 @@ struct Config
     std::string databaseFile;
     std::string javaPath;
 
+    std::vector<std::string> allowedOrigins;
     HttpsConfig https;
     SessionConfig session;
 

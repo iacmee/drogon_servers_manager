@@ -75,6 +75,21 @@ namespace paperpilot
         cfg.backupRoot = requireString(app, "backup_root");
         cfg.databaseFile = requireString(app, "database_file");
         cfg.javaPath = requireString(app, "java_path");
+        const auto &origins = app["allowed_origins"];
+        if (!origins.isArray() || origins.empty())
+            throw std::runtime_error("allowed_origins deve contenere le origini del pannello");
+        for (const auto &origin : origins)
+        {
+            if (!origin.isString())
+                throw std::runtime_error("Origine non valida");
+            const auto value = origin.asString();
+            const auto prefix = value.starts_with("https://") ? 8u :
+                                value.starts_with("http://") ? 7u : 0u;
+            if (!prefix || value.size() <= prefix ||
+                value.find_first_of("/\\?#@* \t\r\n", prefix) != std::string::npos)
+                throw std::runtime_error("Origine non valida: usare schema://host[:porta]");
+            cfg.allowedOrigins.push_back(value);
+        }
         // -------------------------
         // HTTPS
         // -------------------------
@@ -97,6 +112,8 @@ namespace paperpilot
             cfg.session.enabled = getBool(session, "enabled", true);
             cfg.session.timeout = getSize(session, "timeout", 3600);
         }
+        if (!cfg.session.enabled || cfg.session.timeout == 0)
+            throw std::runtime_error("Le sessioni devono essere abilitate con timeout positivo");
         // -------------------------
         // SERVERS
         // -------------------------

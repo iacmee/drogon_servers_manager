@@ -11,7 +11,7 @@ class MinecraftConsole
 {
   public:
 
-    void sendCommand(std::string command);
+    void sendCommand(std::string command, std::function<bool()> authorized);
     void attachToEventLoop();
     void detachFromEventLoop();
     void closeFd();

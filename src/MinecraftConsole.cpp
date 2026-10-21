@@ -142,15 +142,15 @@ void MinecraftConsole::appendLast100Lines(std::string_view data)
     m_last100Lines.erase(0, pos + 1);
 }
 
-void MinecraftConsole::sendCommand(std::string command)
+void MinecraftConsole::sendCommand(std::string command, std::function<bool()> authorized)
 {
     auto *loop = drogon::app().getLoop();
 
     loop->queueInLoop(
-        [this, command = std::move(command)]
+        [this, command = std::move(command), authorized = std::move(authorized)]
         {
-            if (!m_writeChannel)
-                return;
+            if (!authorized() || !m_writeChannel)
+                return ;
 
             m_inputBuffer += command;
             m_inputBuffer += '\n';

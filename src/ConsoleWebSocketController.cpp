@@ -1,3 +1,4 @@
+#include "SessionAccess.hpp"
 #include "ConsoleWebSocketController.hpp"
 #include <algorithm>
 #include <charconv>
@@ -30,7 +31,7 @@ void ConsoleWebSocketController::broadcast(std::int64_t id, std::string_view lin
     std::vector<drogon::WebSocketConnectionPtr> clients;
 
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard lock(m_mutex);
 
         for (const auto &[conn, serverId] : m_connections)
         {
@@ -39,11 +40,11 @@ void ConsoleWebSocketController::broadcast(std::int64_t id, std::string_view lin
         }
     }
 
-    std::string message(lines);
+    const std::string message(lines);
 
     for (const auto &conn : clients)
     {
-        if (conn->connected())
+        if (SessionAccess::allowed(conn))
             conn->send(message);
     }
 }
@@ -63,6 +64,9 @@ void ConsoleWebSocketController::handleNewConnection(
     const drogon::HttpRequestPtr &req,
     const drogon::WebSocketConnectionPtr &conn)
 {
+    if (!SessionAccess::bind(req, conn))
+        return;
+
     const std::string path = req->path();
 
     const auto pos = path.find_last_of('/');
@@ -94,7 +98,7 @@ void ConsoleWebSocketController::handleNewConnection(
     auto servers = m_servers;
     drogon::app().getLoop()->queueInLoop([servers, server, conn]
     {
-        if (conn->connected())
+        if (SessionAccess::allowed(conn))
             conn->send(server->m_console.getLast100Lines());
     });
 }
@@ -104,6 +108,11 @@ void ConsoleWebSocketController::handleNewMessage(
     std::string &&message,
     const drogon::WebSocketMessageType &type)
 {
+    if (!SessionAccess::allowed(conn))
+    {
+        conn->forceClose();
+        return ;
+    }
     if (type != drogon::WebSocketMessageType::Text)
         return ;
 
@@ -121,7 +130,13 @@ void ConsoleWebSocketController::handleNewMessage(
     MinecraftServer *server = findServer(serverId);
 
     if (server)
-        server->m_console.sendCommand(message);
+        server->m_console.sendCommand(message, [weak = std::weak_ptr<drogon::WebSocketConnection>(conn)]
+        {
+            auto connection = weak.lock();
+            if (connection && SessionAccess::allowed(connection))
+                return (true);
+            return (false);
+        });
     else
         conn->send("Minecraft server not found");
 }

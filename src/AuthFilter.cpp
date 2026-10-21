@@ -1,10 +1,12 @@
 #include "AuthFilter.hpp"
+#include "SessionAccess.hpp"
 
 void AuthFilter::doFilter(const drogon::HttpRequestPtr &req, drogon::FilterCallback &&reject, drogon::FilterChainCallback &&next)
 {
     const auto session = req->session();
 
-    const bool authenticated = session && session->getOptional<bool>("authenticated").value_or(false);
+    const auto access = SessionAccess::from(session);
+    const bool authenticated = access && access->valid();
 
     if (!authenticated)
     {

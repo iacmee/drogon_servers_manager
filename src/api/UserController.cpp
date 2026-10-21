@@ -1,3 +1,4 @@
+#include "SessionAccess.hpp"
 #include "UserController.hpp"
 #include <sodium.h>
 
@@ -526,12 +527,25 @@ drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callba
         if (!userExist || !passwordValid)
             co_return (callback(jsonError(drogon::k401Unauthorized, "Invalid username or password")));
 
-		auto session = req->session();
-		session->clear();
-		session->changeSessionIdToClient();
-		session->insert("authenticated", true);
-		session->insert("user_id", user->getValueOfId());
-		session->insert("username", user->getValueOfUsername());
+        auto session = req->session();
+        auto access = std::make_shared<SessionAccess>(SessionAccess::lifetime);
+        session->modify([&](drogon::Session::SessionMap &values)
+        {
+            const auto previous = values.find("access");
+            if (previous != values.end())
+                std::any_cast<std::shared_ptr<SessionAccess>>(previous->second)->revoke();
+            values.clear();
+            values["access"] = access;
+            values["user_id"] = user->getValueOfId();
+            values["username"] = user->getValueOfUsername();
+        });
+        session->changeSessionIdToClient();
+        drogon::app().getLoop()->runAfter(SessionAccess::lifetime.count(),
+            [weak = std::weak_ptr<SessionAccess>(access)]
+            {
+                if (auto grant = weak.lock())
+                    grant->revoke();
+            });
 		Json::Value responseJson;
 		responseJson["status"] = "ok";
 		responseJson["username"] = user->getValueOfUsername();
@@ -557,7 +571,13 @@ void UserController::logout(const drogon::HttpRequestPtr &req, Callback &&callba
 {
     auto session = req->session();
 
-    session->clear();
+    session->modify([](drogon::Session::SessionMap &values)
+    {
+        const auto previous = values.find("access");
+        if (previous != values.end())
+            std::any_cast<std::shared_ptr<SessionAccess>>(previous->second)->revoke();
+        values.clear();
+    });
     session->changeSessionIdToClient();
 
     Json::Value responseJson;
