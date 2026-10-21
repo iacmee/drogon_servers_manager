@@ -56,11 +56,21 @@ clean:
 	rm -rf $(TARGET)
 
 .PHONY: test-security
-test-security: $(filter-out obj/main.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) tests/security_server.cpp $(filter-out obj/main.o,$(OBJECTS)) -o obj/security_test_server $(LIBS)
+obj/security_test_server: tests/security_server.cpp $(filter-out obj/main.o,$(OBJECTS))
+	$(CXX) $(CXXFLAGS) $< $(filter-out obj/main.o,$(OBJECTS)) -o $@ $(LIBS)
+
+test-security: obj/security_test_server
 	python3 tests/security_websocket.py obj/security_test_server
 
 .PHONY: test-console
 test-console: obj/MinecraftConsole.o obj/ConsoleOutput.o obj/SessionAccess.o
 	$(CXX) $(CXXFLAGS) tests/console_limits.cpp $^ -o obj/console_limits_test $(LIBS)
 	./obj/console_limits_test
+
+obj/auth_unit_test: tests/auth_security.cpp obj/PasswordExecutor.o obj/RegistrationFilter.o
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS)
+
+.PHONY: test-auth
+test-auth: obj/auth_unit_test obj/security_test_server
+	./obj/auth_unit_test
+	python3 tests/auth_http.py obj/security_test_server

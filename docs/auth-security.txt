@@ -1,0 +1,45 @@
+Authentication and registration
+
+Requests are capped at 4096 bytes before JSON parsing. This currently applies
+application-wide: all implemented HTTP mutations use small JSON bodies.
+
+Validation is shared by login and registration:
+- Username: 1-128 bytes, printable in the process locale (ASCII in the default
+  C locale), no leading/trailing spaces. No normalization or silent truncation.
+- Password: at most 128 bytes. New accounts require valid UTF-8, at least 12
+  Unicode code points and one ASCII punctuation symbol (e.g. !, @, #, ?, _, -).
+  Spaces and accented letters do not satisfy the special-character requirement.
+  Login accepts older passwords so existing accounts are not locked out.
+- Invite: exactly 43 URL-safe Base64 characters, matching the 32-byte generator.
+
+Registration has an additional filter independent of Hodor: 5 attempts per IP
+and 30 globally in each 60-second window, including invalid attempts. Its address
+map expires entries and has an explicit size bound. Rejections return HTTP 429
+and Retry-After: 60. The existing Hodor login policy remains configured.
+Only the socket peer IP is used, never client-supplied forwarding headers. When
+adding a reverse proxy, configure trusted client IP handling deliberately;
+otherwise all its clients share the proxy's IP quota.
+
+PasswordExecutor runs two workers with room for eight queued operations.
+Hashing and password verification run there, including the dummy verification
+for unknown usernames. Saturation returns HTTP 503 and Retry-After: 1. Worker
+exceptions resume the awaiting request on its originating event loop and return
+an internal error. Startup creates the dummy hash before accepting requests.
+
+Registration first checks invite validity, then computes the hash outside any
+DB transaction. The transaction rechecks and conditionally consumes the invite,
+inserts the user, and removes exhausted invitations. A username conflict rolls
+back without consuming the invite. SQL errors return HTTP 500 rather than being
+reported as invalid invitations. HTTP 201 is sent only after Drogon's commit
+callback reports success; a failed commit never produces a success response.
+
+Tests:
+  make test-auth
+  make test-security
+
+Unit tests deterministically saturate the password queue, check event-loop
+responsiveness, worker exception propagation, validation and rate limits.
+HTTP tests use a temporary SQLite database to exercise invalid inputs, large
+bodies, throttling, simultaneous invite use, duplicate-name rollback, injected
+SQL failures and recovery, and visibility of successful registrations from an
+independent database connection. They do not modify production data.

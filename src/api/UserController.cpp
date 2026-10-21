@@ -1,3 +1,4 @@
+#include "AuthLimits.hpp"
 #include "SessionAccess.hpp"
 #include "UserController.hpp"
 #include <sodium.h>
@@ -65,6 +66,7 @@ void UserController::start(drogon::orm::DbClientPtr db)
     m_db = std::move(db);
     initializeDatabase();
     m_dummyPasswordHash = hashPassword("dummy-password-for-timing-only");
+    m_passwordExecutor = std::make_unique<PasswordExecutor>();
 
     if (needBootStrap())
     {
@@ -393,6 +395,38 @@ drogon::HttpResponsePtr jsonError(drogon::HttpStatusCode status, std::string_vie
     return (response);
 }
 
+namespace
+{
+class CommitAwaiter : public drogon::CallbackAwaiter<bool>
+{
+  public:
+    explicit CommitAwaiter(std::shared_ptr<drogon::orm::Transaction> transaction) : transaction(std::move(transaction)) {}
+    void await_suspend(std::coroutine_handle<> handle)
+    {
+        auto *loop = trantor::EventLoop::getEventLoopOfCurrentThread();
+        if (!loop) throw std::logic_error("Commit requires an event loop");
+        transaction->setCommitCallback([this, loop, handle](bool committed)
+        {
+            loop->queueInLoop([this, handle, committed]
+            {
+                setValue(committed);
+                handle.resume();
+            });
+        });
+        transaction.reset(); // Drogon commits when its last reference is released.
+    }
+  private:
+    std::shared_ptr<drogon::orm::Transaction> transaction;
+};
+
+drogon::HttpResponsePtr passwordBusy()
+{
+    auto response = jsonError(drogon::k503ServiceUnavailable, "Authentication busy, retry later");
+    response->addHeader("Retry-After", "1");
+    return (response);
+}
+}
+
 // -----------------------------------------------------------------------------
 // Register new user
 // -----------------------------------------------------------------------------
@@ -412,28 +446,49 @@ drogon::Task<> UserController::createNewUser(drogon::HttpRequestPtr req, Callbac
     const std::string password = (*json)["password"].asString();
     const std::string token = (*json)["token"].asString();
 
-    // qua dovrei fare i controlli per il nome e la password lunghezza caratteri speciali etc...
+    if (!auth_limits::username(username) || !auth_limits::password(password, true) ||
+        !auth_limits::invite(token))
+        co_return callback(jsonError(drogon::k400BadRequest, "Invalid credentials or invite format (password requires at least 12 characters and one ASCII punctuation symbol, maximum 128 bytes)"));
 
-    auto userId = co_await registerUserWithInviteAsync(username, password, token);
+    try
+    {
+        const auto tokenHash = hashInviteToken(token);
+        const auto invite = co_await findInviteTokenAsync(tokenHash);
+        const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        if (!invite || !invite->getValueOfEnabled() || invite->getValueOfUsesLeft() <= 0 ||
+            (invite->getExpiresAt() && *invite->getExpiresAt() <= now))
+            co_return callback(jsonError(drogon::k403Forbidden, "Invalid invite token or username already in use"));
 
-    if (!userId)
-        co_return (callback(jsonError(drogon::k403Forbidden, "Invalid invite token or username already in use")));
+        PasswordWork<std::string> hashWork(*m_passwordExecutor, [password] { return hashPassword(password); });
+        const auto passwordHash = co_await hashWork;
+        auto userId = co_await registerUserWithInviteAsync(username, passwordHash, tokenHash);
 
-    LOG_INFO << "New registered user=" << username << " id=" << static_cast<Json::Int64>(*userId);
-    Json::Value responseJson;
-    responseJson["status"] = "ok";
-    responseJson["username"] = username;
-    responseJson["id"] = static_cast<Json::Int64>(*userId);
-    auto response = drogon::HttpResponse::newHttpJsonResponse(responseJson);
-    response->setStatusCode(drogon::k201Created);
-    callback(response);
+        if (!userId)
+            co_return (callback(jsonError(drogon::k403Forbidden, "Invalid invite token or username already in use")));
 
+        LOG_INFO << "New registered user id=" << static_cast<Json::Int64>(*userId);
+        Json::Value responseJson;
+        responseJson["status"] = "ok";
+        responseJson["username"] = username;
+        responseJson["id"] = static_cast<Json::Int64>(*userId);
+        auto response = drogon::HttpResponse::newHttpJsonResponse(responseJson);
+        response->setStatusCode(drogon::k201Created);
+        callback(response);
+    }
+    catch (const PasswordQueueFull &)
+    {
+        callback(passwordBusy());
+    }
+    catch (const std::exception &e)
+    {
+        LOG_ERROR << "registration failed: " << e.what();
+        callback(jsonError(drogon::k500InternalServerError, "Internal server error"));
+    }
 }
 
 drogon::Task<std::optional<std::int64_t>>
-UserController::registerUserWithInviteAsync(std::string_view username, std::string_view password, std::string_view Token)
+UserController::registerUserWithInviteAsync(std::string_view username, std::string_view passwordHash, std::string_view tokenHash)
 {
-    const std::string tokenHash = hashInviteToken(Token);
     auto transaction = co_await m_db->newTransactionCoro();
 
     try
@@ -462,17 +517,21 @@ UserController::registerUserWithInviteAsync(std::string_view username, std::stri
             co_return (std::nullopt);
         }
 
-        const std::string passwordHash = hashPassword(password);
-
         auto insertResult = co_await transaction->execSqlCoro(
             R"(
                 INSERT INTO users(username, password_hash, created_at)
                 VALUES (?, ?, ?)
+                ON CONFLICT(username) DO NOTHING
             )",
             username,
             passwordHash,
             nowSeconds);
 
+        if (insertResult.affectedRows() != 1)
+        {
+            transaction->rollback();
+            co_return std::nullopt;
+        }
         const auto userId = static_cast<std::int64_t>(insertResult.insertId());
 
         co_await transaction->execSqlCoro(
@@ -483,15 +542,14 @@ UserController::registerUserWithInviteAsync(std::string_view username, std::stri
             )",
             tokenHash);
 
+        if (!(co_await CommitAwaiter(std::move(transaction))))
+            throw std::runtime_error("Registration commit failed");
         co_return (userId);
     }
-    catch (const drogon::orm::DrogonDbException &e)
+    catch (...)
     {
-        transaction->rollback();
-
-        LOG_ERROR << e.base().what();
-
-        co_return (std::nullopt);
+        if (transaction) transaction->rollback();
+        throw ;
     }
 }
 
@@ -511,8 +569,7 @@ drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callba
 
 	const std::string username = (*json)["username"].asString();
 	std::string password = (*json)["password"].asString();
-	if (username.empty() || username.size() > 128 ||
-        password.empty() || password.size() > 128)
+	if (!auth_limits::username(username) || !auth_limits::password(password, false))
 		co_return (callback(jsonError(drogon::k400BadRequest, "Invalid username or password")));
 
 	try
@@ -520,9 +577,9 @@ drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callba
 		auto user = co_await findUserAsync(username);
 
         const bool userExist = user.has_value();
-        const std::string &passwordHash =
-            userExist ? user->getValueOfPasswordHash() : m_dummyPasswordHash;
-        const bool passwordValid = verifyPassword(password, passwordHash);
+        const std::string &passwordHash = userExist ? user->getValueOfPasswordHash() : m_dummyPasswordHash;
+        PasswordWork<bool> verifyWork(*m_passwordExecutor, [password, passwordHash] { return verifyPassword(password, passwordHash); });
+        const bool passwordValid = co_await verifyWork;
 
         if (!userExist || !passwordValid)
             co_return (callback(jsonError(drogon::k401Unauthorized, "Invalid username or password")));
@@ -554,6 +611,10 @@ drogon::Task<> UserController::login(drogon::HttpRequestPtr req, Callback callba
 		response->setStatusCode(drogon::k200OK);
 		callback(response);
 	}
+    catch (const PasswordQueueFull &)
+    {
+        callback(passwordBusy());
+    }
 	catch (const std::exception &e)
 	{
 		LOG_ERROR << "login failed: " << e.what();

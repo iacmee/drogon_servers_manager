@@ -213,10 +213,13 @@ for (const register of [false, true]) {
         const username = $(`${prefix}Username`).value.trim();
         const password = $(`${prefix}Password`).value;
         if (!username || !password) { notice("Inserisci nome utente e password.", true); return; }
+        const passwordBytes = new TextEncoder().encode(password).length;
+        if (passwordBytes > 128) { notice("La password è troppo lunga.", true); return; }
+        if (register && (Array.from(password).length < 12 || !/[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]/.test(password))) { notice("La password deve contenere almeno 12 caratteri e un carattere speciale (es. !, @, #, ?, _, -).", true); return; }
         const payload = { username, password };
         if (register) {
             payload.token = $("registerToken").value.trim();
-            if (!payload.token) { notice("Inserisci il token di invito.", true); return; }
+            if (!/^[A-Za-z0-9_-]{43}$/.test(payload.token)) { notice("Controlla il token: incollalo per intero, senza modificarlo.", true); return; }
         }
         const button = form.querySelector("button[type=submit]");
         button.disabled = true;

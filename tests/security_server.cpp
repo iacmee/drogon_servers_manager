@@ -1,3 +1,4 @@
+#include "AuthLimits.hpp"
 #include "ConsoleLimits.hpp"
 #include "SessionAccess.hpp"
 #include "ServerController.hpp"
@@ -17,6 +18,7 @@ int main(int argc, char **argv)
     servers->emplace_back(1, "test", "/tmp", "unused.service", "/tmp/unused.log",
                           "/tmp/unused.jar", "/usr/bin/java", provider);
     auto &app = drogon::app();
+    app.setClientMaxBodySize(auth_limits::bodyBytes);
     app.setClientMaxWebSocketMessageSize(console_limits::commandBytes);
     app.setThreadNum(2);
     app.enableSession(60, drogon::Cookie::SameSite::kLax);

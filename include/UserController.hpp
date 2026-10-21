@@ -2,6 +2,7 @@
 
 #include "InviteTokens.h"
 #include "Users.h"
+#include "PasswordExecutor.hpp"
 #include <drogon/drogon.h>
 #include <chrono>
 #include <cstdint>
@@ -25,7 +26,7 @@ class UserController : public drogon::HttpController<UserController>
 
 	ADD_METHOD_TO(UserController::login, "/api/auth/login", drogon::Post);
 	ADD_METHOD_TO(UserController::logout, "/api/auth/logout", drogon::Post);
-	ADD_METHOD_TO(UserController::createNewUser, "/api/auth/register", drogon::Post);
+	ADD_METHOD_TO(UserController::createNewUser, "/api/auth/register", drogon::Post, "RegistrationFilter");
 
 	METHOD_LIST_END
 
@@ -36,6 +37,7 @@ class UserController : public drogon::HttpController<UserController>
   private:
     drogon::orm::DbClientPtr m_db;
     std::string m_dummyPasswordHash;
+    std::unique_ptr<PasswordExecutor> m_passwordExecutor;
 
 	void initializeDatabase();
     std::string generateInviteToken();
@@ -48,7 +50,7 @@ class UserController : public drogon::HttpController<UserController>
     drogon::Task<std::optional<drogon_model::sqlite3::Users>> findUserAsync(const std::string &username);
 	drogon::Task<std::optional<std::int64_t>> insertUserAsync(std::string_view username, std::string_view passwordHash);
     drogon::Task<std::optional<std::int64_t>> registerUserWithInviteAsync(std::string_view username,
-        std::string_view password, std::string_view tokenHash);
+        std::string_view passwordHash, std::string_view tokenHash);
 
     std::optional<drogon_model::sqlite3::Users> findUser(const std::string &username);
 	std::optional<std::int64_t> insertUser(std::string_view username, std::string_view password);

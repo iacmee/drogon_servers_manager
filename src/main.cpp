@@ -1,3 +1,4 @@
+#include "AuthLimits.hpp"
 #include "ConsoleLimits.hpp"
 #include "SessionAccess.hpp"
 #include "config.h"
@@ -33,6 +34,7 @@ void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Confi
 {
     SessionAccess::lifetime = std::chrono::seconds(config.session.timeout);
     WebSocketOriginFilter::allowedOrigins = config.allowedOrigins;
+    app.setClientMaxBodySize(auth_limits::bodyBytes);
     app.setClientMaxWebSocketMessageSize(console_limits::commandBytes);
     app.setThreadNum(config.threads);
     app.setDocumentRoot(config.documentRoot);
