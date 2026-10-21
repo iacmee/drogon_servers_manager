@@ -48,3 +48,8 @@ reset_db:
 clean:
 	rm -rf $(OBJ_DIR)
 	rm -rf $(TARGET)
+
+.PHONY: test-security
+test-security: $(OBJECTS)
+	$(CXX) $(CXXFLAGS) tests/security_server.cpp $(filter-out obj/main.o,$(OBJECTS)) -o obj/security_test_server $(LIBS)
+	python3 tests/security_websocket.py obj/security_test_server
