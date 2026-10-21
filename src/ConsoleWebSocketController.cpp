@@ -1,4 +1,5 @@
 #include "SessionAccess.hpp"
+#include "ConsoleLimits.hpp"
 #include "ConsoleWebSocketController.hpp"
 #include <algorithm>
 #include <charconv>
@@ -28,25 +29,20 @@ ConsoleWebSocketController::~ConsoleWebSocketController()
 
 void ConsoleWebSocketController::broadcast(std::int64_t id, std::string_view lines)
 {
-    std::vector<drogon::WebSocketConnectionPtr> clients;
+    std::vector<std::shared_ptr<ConsoleOutput>> clients;
 
     {
         std::lock_guard lock(m_mutex);
 
-        for (const auto &[conn, serverId] : m_connections)
+        for (const auto &[conn, client] : m_connections)
         {
-            if (serverId == id)
-                clients.push_back(conn);
+            if (client.serverId == id)
+                clients.push_back(client.output);
         }
     }
 
-    const std::string message(lines);
-
-    for (const auto &conn : clients)
-    {
-        if (SessionAccess::allowed(conn))
-            conn->send(message);
-    }
+    for (const auto &output : clients)
+        output->enqueue(lines);
 }
 
 MinecraftServer *ConsoleWebSocketController::findServer(std::int64_t id)
@@ -88,18 +84,19 @@ void ConsoleWebSocketController::handleNewConnection(
         return ;
     }
 
+    auto output = std::make_shared<ConsoleOutput>(conn);
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_connections.emplace(conn, serverId);
+        m_connections.emplace(conn, Client{serverId, output});
     }
 
     LOG_INFO << "WebSocket connected to server " << serverId;
-    conn->send("Connected to Minecraft server " + std::to_string(serverId) + "\n");
+    output->enqueue("Connected to Minecraft server " + std::to_string(serverId) + "\n");
     auto servers = m_servers;
-    drogon::app().getLoop()->queueInLoop([servers, server, conn]
+    drogon::app().getLoop()->queueInLoop([servers, server, conn, output]
     {
         if (SessionAccess::allowed(conn))
-            conn->send(server->m_console.getLast100Lines());
+            output->enqueue(server->m_console.getLast100Lines());
     });
 }
 
@@ -113,32 +110,61 @@ void ConsoleWebSocketController::handleNewMessage(
         conn->forceClose();
         return ;
     }
-    if (type != drogon::WebSocketMessageType::Text)
-        return ;
-
-    std::int64_t serverId;
-
+    Client client;
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_connections.find(conn);
-        if (it == m_connections.end())
+        std::lock_guard lock(m_mutex);
+        const auto it = m_connections.find(conn);
+        if (it == m_connections.end() || !it->second.acceptingCommands)
             return ;
-        serverId = it->second;
+        client = it->second;
     }
-
-    LOG_INFO << "Server " << serverId << " command: " << message;
-    MinecraftServer *server = findServer(serverId);
-
-    if (server)
-        server->m_console.sendCommand(message, [weak = std::weak_ptr<drogon::WebSocketConnection>(conn)]
+    if (type == drogon::WebSocketMessageType::Pong)
+    {
+        client.output->acknowledge(message);
+        return ;
+    }
+    if (type == drogon::WebSocketMessageType::Ping || type == drogon::WebSocketMessageType::Close)
+        return ;
+    const auto reject = [&](const std::string &reason)
+    {
+        {
+            std::lock_guard lock(m_mutex);
+            if (auto it = m_connections.find(conn); it != m_connections.end())
+                it->second.acceptingCommands = false;
+        }
+        conn->shutdown(drogon::CloseCode::kViolation, reason);
+        drogon::app().getLoop()->runAfter(1, [weak = std::weak_ptr<drogon::WebSocketConnection>(conn)]
+        {
+            if (auto connection = weak.lock())
+                connection->forceClose();
+        });
+    };
+    const auto access = conn->getContext<SessionAccess>();
+    if (!access->allowCommand())
+    {
+        // Closing also bounds error replies during a flood.
+        reject("Command rate exceeded");
+        return ;
+    }
+    if (type != drogon::WebSocketMessageType::Text || !console_limits::validCommand(message))
+    {
+        reject("Expected one command, maximum 4096 bytes");
+        return;
+    }
+    auto *server = findServer(client.serverId);
+    if (!server)
+        return ;
+    server->m_console.sendCommand(std::move(message),
+        [weak = std::weak_ptr<drogon::WebSocketConnection>(conn)]
         {
             auto connection = weak.lock();
-            if (connection && SessionAccess::allowed(connection))
-                return (true);
-            return (false);
+            return (connection && SessionAccess::allowed(connection));
+        },
+        [weak = std::weak_ptr<ConsoleOutput>(client.output)](std::string_view error)
+        {
+            if (auto output = weak.lock())
+                output->enqueue("[console error: " + std::string(error) + "]\n");
         });
-    else
-        conn->send("Minecraft server not found");
 }
 
 void ConsoleWebSocketController::handleConnectionClosed(

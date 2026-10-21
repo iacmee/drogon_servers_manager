@@ -1,0 +1,19 @@
+--- a/lib/src/WebSocketConnectionImpl.cc
++++ b/lib/src/WebSocketConnectionImpl.cc
+@@ -368,6 +368,16 @@
+                 return false;
+             }
+         }
++        // Bound accumulated fragments before waiting for or copying their payload.
++        // Apply to masked and unmasked frames; subtraction avoids size overflow.
++        const auto maxMessageSize = HttpAppFrameworkImpl::instance()
++                                        .getClientMaxWebSocketMessageSize();
++        if (message_.size() > maxMessageSize ||
++            length > maxMessageSize - message_.size())
++        {
++            buffer->retrieveAll();
++            return false;
++        }
+         if (isMasked != 0)
+         {
+             // The message is sent by the client, check the length

@@ -11,7 +11,8 @@ class MinecraftConsole
 {
   public:
 
-    void sendCommand(std::string command, std::function<bool()> authorized);
+    void sendCommand(std::string command, std::function<bool()> authorized,
+                     std::function<void(std::string_view)> rejected);
     void attachToEventLoop();
     void detachFromEventLoop();
     void closeFd();
@@ -38,6 +39,8 @@ class MinecraftConsole
 
     std::string m_outputBuffer;
     std::string m_inputBuffer;
+    // Counts bytes in both event-loop tasks and the write buffer.
+    std::atomic<std::size_t> m_pendingCommandBytes{0};
     std::string m_last100Lines;
 
     std::function<void(std::string_view)> m_outputCallback;

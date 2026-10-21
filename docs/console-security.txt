@@ -1,0 +1,44 @@
+Console limits and build requirements
+
+Build:
+  bash tools/build_drogon.sh /path/to/local/drogon-checkout
+  make -j2
+  make test-console
+  make test-security
+
+The checkout must contain Drogon commit
+4c5430757ea5451a7c38fbbef4b4bef7dbb47f2f and its Trantor submodule commit.
+The script builds offline into .deps/ and does not change the original checkout
+or system libraries. Build prerequisites are CMake, a C++20 compiler and the
+project's existing development libraries. WebSocket integration tests additionally
+require Python websockets (tested with 10.4) and access to localhost sockets.
+
+Drogon 1.9.13's parser limits individual frames but can accumulate a larger
+fragmented message. patches/drogon-websocket-message-limit.patch bounds the
+accumulated payload before copying it, including unfinished messages.
+The Makefile requires this patched dependency. Deployment must include
+.deps/install/lib beside servers_manager; the executable uses a relative RPATH.
+Updating Drogon requires reviewing the patch and rerunning the fragment tests.
+
+Current limits (include/ConsoleLimits.hpp):
+- Commands: at most 4096 bytes, one nonempty line. The current std::isprint
+  filter accepts printable ASCII in the default C locale; accented UTF-8 text
+  is rejected. ASCII control characters, newline and DEL are rejected.
+- Rate per login/session: five commands of initial burst, refill five per second,
+  shared across that session's console connections. This is not a per-account
+  limit across separate logins. Invalid commands count towards the rate.
+- Pending input per Minecraft server: 64 KiB, including queued event-loop tasks
+  and newline delimiters. Full queues and unavailable consoles report errors.
+- History: at most 100 complete lines and 64 KiB. Overlong unfinished lines are
+  discarded with a marker. Each read callback handles at most 64 KiB, allowing
+  other work on the event loop between batches.
+- Output per console client: at most 256 KiB queued, sent in chunks up to 8 KiB.
+  Each chunk is followed by an unpredictable Ping token. Only the corresponding
+  Pong releases the next chunk; ordinary browsers answer automatically.
+  Overflow or no acknowledgement within ten seconds disconnects the client.
+  At most one acknowledgement timer is active for each output stream.
+
+A command accepted into the queue is not proof of execution. Commands already
+written to Minecraft cannot be withdrawn. The browser should check the logs.
+These changes do not implement account-wide quotas, global connection limits,
+HTTP rate limiting, registration validation or password worker threads.

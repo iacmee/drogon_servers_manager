@@ -1,4 +1,5 @@
 #pragma once
+#include "ConsoleLimits.hpp"
 #include <chrono>
 #include <drogon/WebSocketConnection.h>
 #include <drogon/drogon.h>
@@ -10,6 +11,7 @@ class SessionAccess
   public:
 	explicit SessionAccess(std::chrono::seconds lifetime);
 	bool valid();
+    bool allowCommand();
 	bool attach(const drogon::WebSocketConnectionPtr &connection);
 	void revoke();
 	static std::shared_ptr<SessionAccess> from(const drogon::SessionPtr &session);
@@ -22,6 +24,8 @@ class SessionAccess
     const std::chrono::steady_clock::time_point expires;
 	std::mutex mutex;
 	bool revoked{false};
+    double commandTokens{console_limits::commandBurst};
+    std::chrono::steady_clock::time_point lastCommand{std::chrono::steady_clock::now()};
 	std::vector<std::weak_ptr<drogon::WebSocketConnection>> connections;
 };
 

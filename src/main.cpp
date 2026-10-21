@@ -1,3 +1,4 @@
+#include "ConsoleLimits.hpp"
 #include "SessionAccess.hpp"
 #include "config.h"
 #include "UserController.hpp"
@@ -32,6 +33,7 @@ void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Confi
 {
     SessionAccess::lifetime = std::chrono::seconds(config.session.timeout);
     WebSocketOriginFilter::allowedOrigins = config.allowedOrigins;
+    app.setClientMaxWebSocketMessageSize(console_limits::commandBytes);
     app.setThreadNum(config.threads);
     app.setDocumentRoot(config.documentRoot);
     app.addDbClient(drogon::orm::Sqlite3Config{1, config.databaseFile, "default", -1});

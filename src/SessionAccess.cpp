@@ -84,3 +84,20 @@ void WebSocketOriginFilter::doFilter(const drogon::HttpRequestPtr &req,
     }
     next();
 }
+
+// Shared across all console sockets belonging to the same login.
+bool SessionAccess::allowCommand()
+{
+    std::lock_guard lock(mutex);
+    const auto now = std::chrono::steady_clock::now();
+
+    if (revoked || now >= expires)
+        return (false);
+
+    commandTokens = std::min(console_limits::commandBurst, commandTokens + std::chrono::duration<double>(now - lastCommand).count() * console_limits::commandRate);
+    lastCommand = now;
+    if (commandTokens < 1.0)
+        return (false);
+    commandTokens -= 1.0;
+    return (true);
+}

@@ -1,4 +1,5 @@
 #include "MinecraftConsole.hpp"
+#include "ConsoleLimits.hpp"
 #include <fcntl.h>
 // #include <utility>
 // #include <memory>
@@ -66,13 +67,24 @@ void MinecraftConsole::handleRead()
 {
     char buffer[8192];
 
-    while (true)
+    std::size_t processed = 0;
+    while (processed < console_limits::readBudget)
     {
         ssize_t n = read(m_readFd, buffer, sizeof(buffer));
 
         if (n > 0)
         {
             m_outputBuffer.append(buffer, n);
+            processed += static_cast<std::size_t>(n);
+            handleConsoleData();
+            if (m_outputBuffer.size() > console_limits::historyBytes)
+            {
+                m_outputBuffer.clear();
+                constexpr std::string_view warning = "[console: overlong log line discarded]\n";
+                appendLast100Lines(warning);
+                if (m_outputCallback)
+                    m_outputCallback(warning);
+            }
             continue ;
         }
         else if (n == 0)
@@ -125,6 +137,11 @@ std::string MinecraftConsole::getLast100Lines()
 void MinecraftConsole::appendLast100Lines(std::string_view data)
 {
     m_last100Lines.append(data);
+    if (m_last100Lines.size() > console_limits::historyBytes)
+    {
+        const auto cut = m_last100Lines.find('\n', m_last100Lines.size() - console_limits::historyBytes);
+        m_last100Lines.erase(0, cut == std::string::npos ? m_last100Lines.size() : cut + 1);
+    }
 
     std::size_t pos = m_last100Lines.size();
 
@@ -142,22 +159,39 @@ void MinecraftConsole::appendLast100Lines(std::string_view data)
     m_last100Lines.erase(0, pos + 1);
 }
 
-void MinecraftConsole::sendCommand(std::string command, std::function<bool()> authorized)
+void MinecraftConsole::sendCommand(std::string command, std::function<bool()> authorized,
+                                  std::function<void(std::string_view)> rejected)
 {
-    auto *loop = drogon::app().getLoop();
+    if (!console_limits::validCommand(command))
+    {
+        rejected("Invalid command (single line, maximum 4096 bytes)");
+        return;
+    }
+    const auto size = command.size() + 1;
+    auto pending = m_pendingCommandBytes.load();
+    do
+    {
+        if (size > console_limits::pendingCommands - pending)
+        {
+            rejected("Console busy: command queue is full");
+            return ;
+        }
+    } while (!m_pendingCommandBytes.compare_exchange_weak(pending, pending + size));
 
-    loop->queueInLoop(
-        [this, command = std::move(command), authorized = std::move(authorized)]
+    drogon::app().getLoop()->queueInLoop(
+        [this, command = std::move(command), authorized = std::move(authorized),
+         rejected = std::move(rejected), size]
         {
             if (!authorized() || !m_writeChannel)
+            {
+                m_pendingCommandBytes.fetch_sub(size);
+                rejected("Console unavailable or session expired");
                 return ;
-
+            }
             m_inputBuffer += command;
             m_inputBuffer += '\n';
-
             m_writeChannel->enableWriting();
-        }
-    );
+        });
 }
 
 void MinecraftConsole::handleWrite()
@@ -169,6 +203,7 @@ void MinecraftConsole::handleWrite()
         if (n > 0)
         {
             m_inputBuffer.erase(0, n);
+            m_pendingCommandBytes.fetch_sub(static_cast<std::size_t>(n));
             continue ;
         }
 
@@ -212,6 +247,8 @@ void MinecraftConsole::detachReadChannel()
 
 void MinecraftConsole::detachWriteChannel()
 {
+    m_pendingCommandBytes.fetch_sub(m_inputBuffer.size());
+    m_inputBuffer.clear();
     if (!m_writeChannel)
         return ;
 

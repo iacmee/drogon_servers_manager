@@ -1,6 +1,7 @@
 #pragma once
 #include <drogon/WebSocketController.h>
 #include "MinecraftServer.hpp"
+#include "ConsoleOutput.hpp"
 
 class ConsoleWebSocketController : public drogon::WebSocketController<ConsoleWebSocketController, false>
 {
@@ -29,7 +30,13 @@ class ConsoleWebSocketController : public drogon::WebSocketController<ConsoleWeb
 
   private:
     std::mutex m_mutex;
-    std::unordered_map<drogon::WebSocketConnectionPtr, std::int64_t> m_connections;
+    struct Client
+    {
+        std::int64_t serverId;
+        std::shared_ptr<ConsoleOutput> output;
+        bool acceptingCommands{true};
+    };
+    std::unordered_map<drogon::WebSocketConnectionPtr, Client> m_connections;
     std::shared_ptr<std::vector<MinecraftServer>> m_servers;
     
 };
