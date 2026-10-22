@@ -1,17 +1,15 @@
 {
     "app": {
-        "bind": "127.0.0.1",
-        "allowed_origins": ["https://localhost:8443", "https://127.0.0.1:8443"],
-        "port": 8443,
+        "bind": "192.168.1.159",
+        "allowed_origins": ["https://minecraft.brunialti.online"],
+        "port": 26000,
         "threads": 2,
         "java_path": "/usr/bin/java",
         "document_root": "/home/iacme/Desktop/https/static",
         "backup_root": "/home/iacme/Downloads/PaperPilot-1.0.0/backups",
         "database_file": "/home/iacme/Desktop/https/db/database.db",
         "https": {
-            "enabled": true,
-            "cert": "/home/iacme/Desktop/https/certs/server.crt",
-            "key": "/home/iacme/Desktop/https/certs/server.key"
+            "enabled": false
         },
         "session": {
             "enabled": true,
@@ -20,8 +18,16 @@
     },
     "plugins": [
         {
-            "name": "drogon::plugin::Hodor",
+            "name": "drogon::plugin::RealIpResolver",
             "dependencies": [],
+            "config": {
+                "trust_ips": ["192.168.1.37"],
+                "from_header": "x-forwarded-for"
+            }
+        },
+        {
+            "name": "drogon::plugin::Hodor",
+            "dependencies": ["drogon::plugin::RealIpResolver"],
             "config": {
                 "algorithm": "sliding_window",
                 "urls": [
@@ -32,7 +38,7 @@
                 "ip_capacity": 20,
                 "user_capacity": 15,
                 "multi_threads": true,
-                "use_real_ip_resolver": false,
+                "use_real_ip_resolver": true,
                 "rejection_message": "Too many authentication attempts",
                 "limiter_expire_time": 600,
                 "trust_ips": []
@@ -40,9 +46,10 @@
         },
         {
             "name": "drogon::plugin::AccessLogger",
-            "dependencies": [],
+            "dependencies": ["drogon::plugin::RealIpResolver"],
             "config": {
                 "use_spdlog": false,
+                "use_real_ip": true,
                 "log_path": "./logs",
                 "log_file": "access.log",
                 "log_index": 1,

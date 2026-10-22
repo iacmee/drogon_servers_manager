@@ -1,4 +1,5 @@
 #include "AuthLimits.hpp"
+#include "HttpSecurity.hpp"
 #include "ConsoleLimits.hpp"
 #include "SessionAccess.hpp"
 #include "config.h"
@@ -34,6 +35,7 @@ void configureApplication(drogon::HttpAppFramework &app, const paperpilot::Confi
 {
     SessionAccess::m_lifetime = std::chrono::seconds(config.session.timeout);
     WebSocketOriginFilter::m_allowedOrigins = config.allowedOrigins;
+    configureHttpSecurity(app, config.allowedOrigins);
     app.setClientMaxBodySize(auth_limits::bodyBytes);
     app.setClientMaxWebSocketMessageSize(console_limits::commandBytes);
     app.setThreadNum(config.threads);
@@ -60,6 +62,8 @@ void registerControllers(drogon::HttpAppFramework &app,
     app.registerController(statusController);
     app.registerBeginningAdvice([servers, &provider, weak = std::weak_ptr<ServersWebSocketController>(statusController)]
     {
+        if (servers->empty())
+            return;
         // Subscribe once on the main event loop's connection.
         auto &bus = provider.current();
         const int r = bus.callMethod(
@@ -146,7 +150,7 @@ int main(int argc, char *argv[])
         app.registerBeginningAdvice(configureHodor);
         configureListener(app, config);
 
-        std::cout << "Bind: https://" << config.bind << ":" << config.port << "\n";
+        std::cout << "Bind: " << (config.https.enabled ? "https://" : "http://") << config.bind << ":" << config.port << "\n";
         app.run();
     }
     catch (const std::exception &e)

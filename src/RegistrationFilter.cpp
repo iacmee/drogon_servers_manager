@@ -1,5 +1,6 @@
 #include "RegistrationFilter.hpp"
 #include "AuthLimits.hpp"
+#include <drogon/plugins/RealIpResolver.h>
 
 bool RegistrationLimiter::allow(const std::string &ip, Clock::time_point now)
 {
@@ -31,9 +32,9 @@ bool RegistrationLimiter::allow(const std::string &ip, Clock::time_point now)
 void RegistrationFilter::doFilter(const drogon::HttpRequestPtr &req,
     drogon::FilterCallback &&reject, drogon::FilterChainCallback &&next)
 {
-    // Never trust caller-supplied forwarding headers. Proxy trust is configured
-    // separately at deployment; until then proxy clients share its IP budget.
-    if (!m_limiter.allow(req->peerAddr().toIp()))
+    // Falls back to the socket peer when no resolver is configured. The proxy
+    // profile trusts only the configured reverse proxy, which must overwrite X-Forwarded-For.
+    if (!m_limiter.allow(drogon::plugin::RealIpResolver::GetRealAddr(req).toIp()))
     {
         Json::Value json;
         json["error"] = "Too many registration attempts";

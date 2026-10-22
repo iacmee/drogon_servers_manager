@@ -31,7 +31,9 @@ async def check(binary):
                 def request(path, data=None):
                     body = None if data is None else json.dumps(data).encode()
                     req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body,
-                                                 headers={"Content-Type": "application/json"})
+                                                 headers={"Content-Type": "application/json", "Origin": "https://panel.example",
+                                                          # This fixture uses loopback HTTP; send secure cookies explicitly.
+                                                          "Cookie": "; ".join(f"{c.name}={c.value}" for c in jar)})
                     try:
                         with client.open(req, timeout=2) as response:
                             return response.status

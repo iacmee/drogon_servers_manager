@@ -3,10 +3,13 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import secrets
 import socket
+import ssl
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -21,7 +24,7 @@ PASSWORD = "a-long-test-password"
 class Server:
     def request(self, path, body, headers=None):
         request = urllib.request.Request(self.url + path, data=json.dumps(body).encode(),
-                                        headers={"Content-Type": "application/json", **(headers or {})})
+                                        headers={"Content-Type": "application/json", "Origin": "https://panel.example", **(headers or {})})
         try:
             response = urllib.request.urlopen(request, timeout=5)
         except urllib.error.HTTPError as error:
@@ -42,7 +45,7 @@ class Server:
 
 
 @contextmanager
-def server(binary):
+def server(binary, tls=False, proxy_profile=None):
     with tempfile.TemporaryDirectory(prefix="paperpilot-auth-") as directory:
         root = Path(directory)
         instance = Server()
@@ -51,16 +54,34 @@ def server(binary):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
-        instance.url = f"http://127.0.0.1:{port}"
+        instance.url = f"{'https' if tls else 'http'}://127.0.0.1:{port}"
+        command = [str(Path(binary).resolve()), str(instance.database), str(port)]
+        context = None
+        if tls:
+            cert, key = root / "cert.pem", root / "key.pem"
+            subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                            "-keyout", str(key), "-out", str(cert), "-days", "1",
+                            "-subj", "/CN=localhost"], check=True, capture_output=True)
+            command += [str(cert), str(key)]
+            # Only this isolated test's self-signed certificate is used.
+            context = ssl._create_unverified_context()
+        instance.context = context
+        shutil.copytree(Path(__file__).resolve().parents[1] / "static", root / "static")
+        environment = os.environ.copy()
+        environment.pop("PAPERPILOT_TEST_PROXY_PROFILE", None)
+        if proxy_profile is not None:
+            profile = root / "proxy.json"
+            profile.write_text(json.dumps(proxy_profile))
+            environment["PAPERPILOT_TEST_PROXY_PROFILE"] = str(profile)
         with (root / "server.log").open("w+") as log:
-            process = subprocess.Popen([str(Path(binary).resolve()), str(instance.database), str(port)],
-                                       cwd=root, stdout=log, stderr=log)
+            process = subprocess.Popen(command,
+                                       cwd=root, stdout=log, stderr=log, env=environment)
             try:
                 for _ in range(200):
                     if process.poll() is not None:
                         raise RuntimeError(f"Auth test server exited: {process.returncode}")
                     try:
-                        urllib.request.urlopen(instance.url + "/ready", timeout=.2)
+                        urllib.request.urlopen(instance.url + "/ready", timeout=.2, context=context)
                         break
                     except urllib.error.HTTPError:
                         break

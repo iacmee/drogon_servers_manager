@@ -1,0 +1,28 @@
+Local manual test profile
+
+From the repository root:
+    make run-test
+Then open https://localhost:8443 or https://127.0.0.1:8443.
+
+config/config.test.json is independent of config/config.json:
+- Listens only on loopback, using direct HTTPS and no trusted proxy.
+- Keeps production security checks and authentication limits enabled.
+- Uses db/test/database.db, db/test/backups and logs/test.
+- Does not configure Minecraft services. The panel's server list starts empty.
+  Configure only dedicated test instances in this profile to exercise commands.
+- The empty server list avoids opening a systemd monitoring connection.
+- On the first run, find the initial invitation token in the process output and
+  register a test account. Production accounts/data are not reused.
+
+make prepare-test-config creates missing directories, a database file and a
+30-day self-signed certificate (with localhost/IP SAN) under certs/test.
+It does not erase existing data or replace an existing certificate/key pair.
+The certificate is for local testing, not publicly trusted; the browser may
+require an explicit exception for this local address. No system trust store is
+modified. Never disable certificate verification for the public deployment.
+After expiry, regenerate only the certificate/key under certs/test.
+
+Stop the foreground process with Ctrl+C. No service is installed or restarted.
+Use make run for the separate production configuration behind the Raspberry Pi.
+Automated isolated suites remain available via:
+    make test-proxy test-http-security test-auth test-security

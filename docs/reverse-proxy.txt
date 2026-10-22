@@ -1,0 +1,38 @@
+External reverse proxy
+
+The reverse proxy is on a separate Raspberry Pi, address 192.168.1.37.
+No local reverse proxy software or certificate automation is managed here.
+
+Backend configuration
+- RealIpResolver trusts only 192.168.1.37 (not the LAN or localhost).
+- Registration, Hodor login limits and access logging use the resolved client IP.
+- Hodor trust_ips remains empty: this option exempts clients from limits.
+- The proxy must overwrite X-Forwarded-For with the actual client address rather
+  than accepting caller-supplied addresses. Preserve the browser Origin header.
+- The pinned RealIpResolver supports IPv4 client addresses only. IPv6 clients
+  require additional implementation/testing before enabling that path.
+
+Connection settings
+Browser -> https://minecraft.brunialti.online -> Raspberry Pi 192.168.1.37
+        -> http://192.168.1.159:26000
+
+config/config.json binds the backend to its LAN address 192.168.1.159, port 26000,
+with TLS disabled on this LAN hop. Keep that LAN address stable (static assignment
+or DHCP reservation). The only allowed browser origin is
+https://minecraft.brunialti.online; do not replace it with the proxy IP.
+The backend no longer reads the old local certificate/key files.
+Restart the backend with ./servers_manager config/config.json to apply changes.
+
+Allow the backend port only from 192.168.1.37 using the host firewall. Trusting
+forwarded headers does not itself restrict who can connect to the backend.
+
+Keep browser access over HTTPS. Secure session cookies work even when HTTPS is
+terminated at the proxy; configure HSTS on the Raspberry Pi. The LAN hop is
+unencrypted HTTP, so it must remain on the trusted private network.
+This repository does not modify the Raspberry Pi or the machine's firewall.
+
+Verification
+make test-proxy test-http-security test-auth test-security
+The proxy test checks the real configured trust list for untrusted-peer rejection
+and uses a separate loopback peer to simulate a trusted proxy for client quotas.
+It does not verify connectivity or headers of the actual Raspberry Pi.

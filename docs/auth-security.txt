@@ -16,9 +16,10 @@ Registration has an additional filter independent of Hodor: 5 attempts per IP
 and 30 globally in each 60-second window, including invalid attempts. Its address
 map expires entries and has an explicit size bound. Rejections return HTTP 429
 and Retry-After: 60. The existing Hodor login policy remains configured.
-Only the socket peer IP is used, never client-supplied forwarding headers. When
-adding a reverse proxy, configure trusted client IP handling deliberately;
-otherwise all its clients share the proxy's IP quota.
+RealIpResolver is enabled for registration, Hodor and access logs. Only the
+reverse proxy at 192.168.1.37 is trusted to supply X-Forwarded-For. Other peers
+are identified by their socket address. Hodor trust_ips stays empty (that
+setting bypasses limits). See docs/reverse-proxy.txt for deployment details.
 
 PasswordExecutor runs two workers with room for eight queued operations.
 Hashing and password verification run there, including the dummy verification

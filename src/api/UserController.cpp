@@ -78,12 +78,12 @@ void UserController::start(drogon::orm::DbClientPtr db)
         if (!id)
             throw std::runtime_error("Cannot create bootstrap invite token");
 
-        std::cerr
+        std::cout
             << "\n============================================\n"
             << " INITIAL BOOTSTRAP TOKEN\n"
             << " " << token << '\n'
             << " Valid for 5 minutes and one use only\n"
-            << "============================================\n\n";
+            << "============================================\n\n" << std::flush;
     }
 
 }

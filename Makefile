@@ -74,3 +74,26 @@ obj/auth_unit_test: tests/auth_security.cpp obj/PasswordExecutor.o obj/Registrat
 test-auth: obj/auth_unit_test obj/security_test_server
 	./obj/auth_unit_test
 	python3 tests/auth_http.py obj/security_test_server
+
+.PHONY: test-http-security
+test-http-security: obj/security_test_server
+	python3 -B tests/http_security.py obj/security_test_server
+
+.PHONY: test-proxy
+test-proxy: obj/security_test_server
+	python3 -B tests/trusted_proxy.py obj/security_test_server
+
+# Local manual testing: separate data, direct HTTPS, no trusted proxy.
+.PHONY: prepare-test-config run-test
+prepare-test-config:
+	mkdir -p db/test/backups logs/test certs/test
+	touch db/test/database.db
+	@if [ ! -f certs/test/server.crt ] || [ ! -f certs/test/server.key ]; then \
+		umask 077; \
+		openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
+		-keyout certs/test/server.key -out certs/test/server.crt \
+		-subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'; \
+	fi
+
+run-test: all prepare-test-config
+	./$(TARGET) config/config.test.json

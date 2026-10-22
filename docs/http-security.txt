@@ -1,0 +1,44 @@
+HTTP security
+
+configureHttpSecurity() installs the same protections in production and the
+integration test server. It uses app.allowed_origins, also used for WebSockets.
+
+CSRF protection
+- Every method except GET, HEAD and OPTIONS requires an exact allowed Origin.
+- Missing Origin, Origin: null, different schemes/ports and lookalike domains
+  receive 403 before the route handler. Login, registration and logout are covered.
+- There is no Referer fallback and no trust in Host or forwarded headers for this
+  decision. Browser POST/fetch requests supply Origin automatically. CLI clients
+  must supply it explicitly; this does not replace authentication.
+- Keep allowed_origins limited to trusted panel origins. Do not add external sites.
+- GET, HEAD and OPTIONS must remain free of state-changing application actions.
+
+Cookies and transport
+- Drogon's JSESSIONID cookie is hardened after the framework creates or rotates
+  it: Secure, HttpOnly, SameSite=Lax, with the existing host-only scope and Path=/.
+- Browser access requires HTTPS. The current local HTTPS configuration works.
+  An HTTP-only backend behind a TLS proxy is supported without trusting forwarded
+  headers; direct remote HTTP browser login is intentionally unsupported.
+- Direct TLS responses carry HSTS max-age=31536000, without includeSubDomains or
+  preload. If a proxy terminates TLS, configure HSTS at that proxy instead.
+
+Response headers
+- CSP allows scripts/styles/images/fonts from the panel itself and connections
+  to itself plus the configured WebSocket origins. No inline scripts, external
+  dependencies, embedding, plugins or base URL changes are allowed.
+- X-Frame-Options: DENY, X-Content-Type-Options: nosniff,
+  Referrer-Policy: no-referrer and disabled camera/microphone/geolocation.
+- API responses use Cache-Control: no-store.
+- Headers run in pre-sending advice, including static files and routed errors.
+  Early protocol/parser errors handled directly by the HTTP stack are outside
+  this application hook; do not assume they carry these headers.
+
+Verification
+make test-http-security test-auth test-security
+The HTTP security test creates a temporary self-signed TLS certificate and DB;
+its cookie jar exercises Secure cookies over HTTPS. It checks cookie rotation,
+static/API headers, denied origins and preserved sessions after rejected logout.
+The older WebSocket fixture uses loopback HTTP and sends its test cookies
+explicitly; production cookie security is not weakened for that fixture.
+These automated checks do not replace an interactive browser check of the UI
+and a deployment test through the eventual reverse proxy.
